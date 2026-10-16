@@ -15,9 +15,11 @@ try {
   createRoot(root).render(
     <StrictMode>
       <I18nProvider>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
+        <WalletProvider>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </WalletProvider>
       </I18nProvider>
     </StrictMode>
   );
