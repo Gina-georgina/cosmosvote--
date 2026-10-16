@@ -74,6 +74,32 @@ describe('pollEvents', () => {
   });
 });
 
+describe('checkReadiness', () => {
+  it('returns true when the RPC reports healthy', async () => {
+    mockedAxios.post.mockResolvedValueOnce({ data: { result: { status: 'healthy' } } });
+
+    const svc = new NotificationService(BASE_CONFIG);
+
+    await expect(svc.checkReadiness()).resolves.toBe(true);
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      `${BASE_CONFIG.rpcUrl}/`,
+      { jsonrpc: '2.0', id: 1, method: 'getHealth' },
+      { timeout: 5_000 }
+    );
+  });
+
+  it('returns false when the RPC is unreachable or unhealthy', async () => {
+    mockedAxios.post
+      .mockResolvedValueOnce({ data: { result: { status: 'starting' } } })
+      .mockRejectedValueOnce(new Error('connection refused'));
+
+    const svc = new NotificationService(BASE_CONFIG);
+
+    await expect(svc.checkReadiness()).resolves.toBe(false);
+    await expect(svc.checkReadiness()).resolves.toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Webhook delivery
 // ---------------------------------------------------------------------------
