@@ -10,6 +10,47 @@ terraform {
       version = "~> 2.4"
     }
   }
+
+  # ---------------------------------------------------------------------------
+  # Remote state backend (S3 + DynamoDB locking)
+  #
+  # One-time bootstrap (run once per AWS account before `terraform init`):
+  #   1. Create the state bucket:
+  #        aws s3api create-bucket \
+  #          --bucket cosmosvote-tfstate \
+  #          --region us-east-1 \
+  #          --create-bucket-configuration LocationConstraint=us-east-1
+  #        aws s3api put-bucket-versioning \
+  #          --bucket cosmosvote-tfstate \
+  #          --versioning-configuration Status=Enabled
+  #        aws s3api put-bucket-encryption \
+  #          --bucket cosmosvote-tfstate \
+  #          --server-side-encryption-configuration \
+  #            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+  #        aws s3api put-public-access-block \
+  #          --bucket cosmosvote-tfstate \
+  #          --public-access-block-configuration \
+  #            "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+  #   2. Create the DynamoDB lock table:
+  #        aws dynamodb create-table \
+  #          --table-name cosmosvote-tfstate-lock \
+  #          --attribute-definitions AttributeName=LockID,AttributeType=S \
+  #          --key-schema AttributeName=LockID,KeyType=HASH \
+  #          --billing-mode PAY_PER_REQUEST \
+  #          --region us-east-1
+  #   3. Then run: terraform init
+  #
+  # Backend config is split per environment in infra/terraform/envs/:
+  #   terraform init -backend-config="envs/staging.s3.tfbackend"
+  #   terraform init -backend-config="envs/production.s3.tfbackend"
+  # ---------------------------------------------------------------------------
+  backend "s3" {
+    bucket         = "cosmosvote-tfstate"
+    key            = "cosmosvote/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "cosmosvote-tfstate-lock"
+  }
 }
 
 provider "aws" {
