@@ -36,7 +36,7 @@ fn setup(env: &Env) -> (GovernanceContractClient<'_>, TokenContractClient<'_>, A
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     (gov, token, admin, voter, voter2)
 }
@@ -144,7 +144,7 @@ fn test_min_balance_blocks_underfunded_proposer() {
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
     // min proposal balance set to 1_000_000
-    gov.initialize(&admin, &token_id, &1_000_000i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &1_000_000i128, &0u64, &0u32, &false, &None, &0u32);
 
     let result = gov.try_create_proposal(
         &poor,
@@ -172,7 +172,7 @@ fn test_min_balance_allows_funded_proposer() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &1_000_000i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &1_000_000i128, &0u64, &0u32, &false, &None, &0u32);
 
     let id = gov.create_proposal(
         &rich,
@@ -201,7 +201,7 @@ fn test_min_balance_zero_allows_anyone() {
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
     // min balance zero
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // poor proposer should still be able to create
     let id = gov.create_proposal(
@@ -266,7 +266,7 @@ fn test_initialize_success() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     assert_eq!(gov.admin(), admin);
     assert_eq!(gov.proposal_count(), 0);
@@ -277,7 +277,7 @@ fn test_initialize_double_init_fails() {
     let env = Env::default();
     let (gov, _, admin, _, _) = setup(&env);
     let token_id = env.register(TokenContract, ());
-    let result = gov.try_initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    let result = gov.try_initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
     assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
 }
 
@@ -389,7 +389,7 @@ fn test_create_proposal_below_quorum_floor_fails() {
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
     // 10% quorum floor (1000 bps)
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &1000u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &1000u32, &false, &None, &0u32);
 
     // 10% of 1M is 100k. 50k should fail.
     let result = gov.try_create_proposal(
@@ -489,7 +489,7 @@ fn test_vote_uses_snapshot_balance() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // Create proposal -> snapshot captured now
     let id = gov.create_proposal(
@@ -544,7 +544,7 @@ fn test_cast_vote_reentrancy_via_token_balance_at_is_blocked() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     MaliciousTokenStorage::set_governance(&env, &gov_id);
 
@@ -910,7 +910,7 @@ fn test_old_admin_loses_privileges_after_transfer() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&old_admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&old_admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // create a proposal to be cancelled
     let proposal_id = gov.create_proposal(
@@ -1141,7 +1141,7 @@ fn test_restrict_admin_vote_blocks_admin_on_own_proposal() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &true, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &true, &None, &0u32);
 
     // Proposal created by admin
     let id = gov.create_proposal(
@@ -1174,7 +1174,7 @@ fn test_restrict_admin_vote_allows_admin_on_others_proposal() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &true, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &true, &None, &0u32);
 
     // Proposal created by voter (not admin)
     let id = gov.create_proposal(
@@ -1207,7 +1207,7 @@ fn test_restrict_admin_vote_false_allows_admin_everywhere() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // Admin-created proposal
     let id_admin = gov.create_proposal(
@@ -1357,7 +1357,7 @@ fn test_execute_with_treasury_action() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     let action = TreasuryAction {
         recipient: recipient.clone(),
@@ -1879,4 +1879,142 @@ fn test_set_restrict_admin_vote_non_admin_fails() {
     let (gov, _, _, voter, _) = setup(&env);
     let result = gov.try_set_restrict_admin_vote(&voter, &true);
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
+}
+
+// ---------------------------------------------------------------------------
+// Circuit breaker: vote concentration auto-pause (issue #71)
+// ---------------------------------------------------------------------------
+
+/// Helper: set up governance with a custom concentration threshold.
+fn setup_with_threshold(env: &Env, threshold_bps: u32) -> (GovernanceContractClient<'_>, TokenContractClient<'_>, Address, Address, Address) {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let voter = Address::generate(env);
+    let voter2 = Address::generate(env);
+
+    let token_id = env.register(TokenContract, ());
+    let token = TokenContractClient::new(env, &token_id);
+    token.initialize(
+        &admin,
+        &1_000_000_000i128,
+        &String::from_str(env, "CosmosVote"),
+        &String::from_str(env, "VOTE"),
+        &7u32,
+    );
+
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(env, &gov_id);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &threshold_bps);
+
+    (gov, token, admin, voter, voter2)
+}
+
+/// A voter below the threshold should vote normally (no pause, no error).
+#[test]
+fn test_circuit_breaker_below_threshold_passes() {
+    let env = Env::default();
+    // Threshold: 50% (5000 bps)
+    let (gov, token, admin, voter, _) = setup_with_threshold(&env, 5000u32);
+
+    // Give voter 40% of supply (400M / 1B = 40%) — below 50% threshold
+    token.mint(&admin, &voter, &400_000_000i128);
+
+    let id = gov.create_proposal(
+        &admin,
+        &String::from_str(&env, "CB Test Below"),
+        &String::from_str(&env, "Circuit breaker below threshold test"),
+        &1i128,
+        &604_800u64,
+        &None,
+        &None,
+    );
+
+    // Should succeed — 40% < 50%
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    assert!(gov.has_voted(&id, &voter));
+    // Contract should NOT be paused
+    assert!(!gov.is_paused());
+}
+
+/// A voter above the threshold should trigger auto-pause and have their vote blocked.
+#[test]
+fn test_circuit_breaker_above_threshold_pauses() {
+    let env = Env::default();
+    // Threshold: 50% (5000 bps)
+    let (gov, token, admin, voter, _) = setup_with_threshold(&env, 5000u32);
+
+    // Give voter 60% of supply — above 50% threshold
+    token.mint(&admin, &voter, &600_000_000i128);
+
+    let id = gov.create_proposal(
+        &admin,
+        &String::from_str(&env, "CB Test Above"),
+        &String::from_str(&env, "Circuit breaker above threshold test"),
+        &1i128,
+        &604_800u64,
+        &None,
+        &None,
+    );
+
+    // cast_vote should fail with ContractPaused after auto-pause
+    let result = gov.try_cast_vote(&voter, &id, &Vote::Yes);
+    assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
+    // Contract should now be paused
+    assert!(gov.is_paused());
+}
+
+/// A voter at exactly the threshold boundary should be paused (strictly >).
+/// threshold_bps=5000 means > 50% triggers; exactly 50% should NOT trigger.
+#[test]
+fn test_circuit_breaker_at_threshold_does_not_pause() {
+    let env = Env::default();
+    // Threshold: 50% (5000 bps)
+    let (gov, token, admin, voter, _) = setup_with_threshold(&env, 5000u32);
+
+    // Supply = 1_000_000_000 + 500_000_000 minted = 1_500_000_000
+    // voter weight = 500_000_000; ratio = 500M / 1500M = 33.3% < 50%
+    // Use supply of exactly 1_000_000_000. Give voter exactly 500_000_000 (50%).
+    // 500M * 10_000 = 5_000_000_000_000 == 5000 * 1_000_000_000 = 5_000_000_000_000
+    // lhs == rhs → NOT strictly greater, so no pause.
+    token.mint(&admin, &voter, &500_000_000i128);
+
+    let id = gov.create_proposal(
+        &admin,
+        &String::from_str(&env, "CB Test At"),
+        &String::from_str(&env, "Circuit breaker exactly at threshold"),
+        &1i128,
+        &604_800u64,
+        &None,
+        &None,
+    );
+
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    assert!(gov.has_voted(&id, &voter));
+    assert!(!gov.is_paused());
+}
+
+/// When threshold is 0 (disabled), even a 100% holder can vote without triggering a pause.
+#[test]
+fn test_circuit_breaker_threshold_zero_disables() {
+    let env = Env::default();
+    // Threshold: 0 = disabled
+    let (gov, token, admin, voter, _) = setup_with_threshold(&env, 0u32);
+
+    // Give voter 100% of supply (well, admin already has 1B; mint more for voter)
+    token.mint(&admin, &voter, &900_000_000i128);
+
+    let id = gov.create_proposal(
+        &admin,
+        &String::from_str(&env, "CB Disabled"),
+        &String::from_str(&env, "Circuit breaker disabled when threshold=0"),
+        &1i128,
+        &604_800u64,
+        &None,
+        &None,
+    );
+
+    // Should succeed even with large weight — circuit breaker disabled
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    assert!(gov.has_voted(&id, &voter));
+    assert!(!gov.is_paused());
 }

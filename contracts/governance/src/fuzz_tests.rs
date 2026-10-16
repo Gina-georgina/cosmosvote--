@@ -43,7 +43,7 @@ fn setup(env: &Env) -> (GovernanceContractClient<'_>, Address) {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     (gov, proposer)
 }
