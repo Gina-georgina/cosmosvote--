@@ -18,11 +18,11 @@ jobs:
     name: Rust Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -47,9 +47,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -71,14 +71,14 @@ jobs:
     name: Rust Security Linting (Clippy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
           targets: wasm32-unknown-unknown
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Clippy with security lints
         run: |
@@ -96,12 +96,12 @@ jobs:
     name: Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 0   # Full history needed for gitleaks
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -112,13 +112,13 @@ jobs:
     name: Docker Image Vulnerability Scan (Trivy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Build Docker image for scanning
         run: docker build --target builder -t cosmosvote:scan .
 
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
         with:
           image-ref: 'cosmosvote:scan'
           format: 'sarif'
@@ -127,7 +127,7 @@ jobs:
           exit-code: '1'
 
       - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -141,10 +141,10 @@ jobs:
     needs: [rust-audit, npm-audit, rust-lint, secret-scan, docker-scan]
     if: failure()
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Create GitHub issue for security finding
-        uses: actions/github-script@v6
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
           script: |
             const title = `🚨 Scheduled security check failed — ${new Date().toISOString().slice(0, 10)}`;

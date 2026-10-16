@@ -74,6 +74,32 @@ describe('pollEvents', () => {
   });
 });
 
+describe('checkReadiness', () => {
+  it('returns true when the RPC reports healthy', async () => {
+    mockedAxios.post.mockResolvedValueOnce({ data: { result: { status: 'healthy' } } });
+
+    const svc = new NotificationService(BASE_CONFIG);
+
+    await expect(svc.checkReadiness()).resolves.toBe(true);
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      `${BASE_CONFIG.rpcUrl}/`,
+      { jsonrpc: '2.0', id: 1, method: 'getHealth' },
+      { timeout: 5_000 }
+    );
+  });
+
+  it('returns false when the RPC is unreachable or unhealthy', async () => {
+    mockedAxios.post
+      .mockResolvedValueOnce({ data: { result: { status: 'starting' } } })
+      .mockRejectedValueOnce(new Error('connection refused'));
+
+    const svc = new NotificationService(BASE_CONFIG);
+
+    await expect(svc.checkReadiness()).resolves.toBe(false);
+    await expect(svc.checkReadiness()).resolves.toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Webhook delivery
 // ---------------------------------------------------------------------------
@@ -93,10 +119,47 @@ describe('deliverWebhook', () => {
   });
 
   it('does not throw when webhook delivery fails', async () => {
-    mockedAxios.post.mockRejectedValueOnce(new Error('webhook timeout'));
+    mockedAxios.post.mockRejectedValue({ response: { status: 503 }, message: 'webhook unavailable' });
+    jest.useFakeTimers();
 
     const svc = new NotificationService(BASE_CONFIG);
-    await expect(svc.deliverWebhook(makeEvent())).resolves.toBeUndefined();
+    const delivery = svc.deliverWebhook(makeEvent());
+
+    await jest.advanceTimersByTimeAsync(7_000);
+    await expect(delivery).resolves.toBeUndefined();
+    expect(mockedAxios.post).toHaveBeenCalledTimes(4);
+
+    const failureLog = (console.error as jest.Mock).mock.calls
+      .map(([message]) => message)
+      .find((message) => typeof message === 'string' && message.includes('permanently failed'));
+    expect(failureLog).toContain('HTTP 503');
+    jest.useRealTimers();
+  });
+
+  it('retries with exponential backoff and stops after success', async () => {
+    mockedAxios.post
+      .mockRejectedValueOnce({ response: { status: 500 }, message: 'temporary failure' })
+      .mockRejectedValueOnce({ response: { status: 500 }, message: 'temporary failure' })
+      .mockRejectedValueOnce({ response: { status: 500 }, message: 'temporary failure' })
+      .mockResolvedValueOnce({ status: 200 });
+    jest.useFakeTimers();
+
+    const svc = new NotificationService(BASE_CONFIG);
+    const delivery = svc.deliverWebhook(makeEvent());
+
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1_999);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+    await jest.advanceTimersByTimeAsync(3_999);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+    await jest.advanceTimersByTimeAsync(1);
+
+    await expect(delivery).resolves.toBeUndefined();
+    expect(mockedAxios.post).toHaveBeenCalledTimes(4);
+    jest.useRealTimers();
   });
 });
 
