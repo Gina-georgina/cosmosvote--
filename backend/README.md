@@ -2,6 +2,14 @@
 
 Off-chain notification service for CosmosVote. Polls Soroban/Horizon RPC for governance contract events and delivers them to a configured webhook.
 
+## HTTP API and OpenAPI
+
+This package runs a background worker and does not currently expose notification-service HTTP
+routes. `WEBHOOK_URL` is an outbound destination for event delivery, not an API served by this
+process. Consequently, there is no `/openapi.json` or `/docs` endpoint to document yet. Issue #42
+requires an HTTP API and its request/response contracts to be defined before an OpenAPI
+specification and Swagger UI can be generated.
+
 ## Error Tracking
 
 Errors are captured via [Sentry](https://sentry.io). Set `SENTRY_DSN` in your environment to enable. Without it, errors are written to `stderr` only.
