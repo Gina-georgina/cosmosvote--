@@ -67,6 +67,14 @@ npm start start
 ## Subscription Management
 
 Subscriptions are managed via the CLI. Each subscriber can filter by proposal ID and/or event type.
+The notification service does not currently expose HTTP subscribe or unsubscribe endpoints, and its
+subscription store is a JSON file rather than a database. The RBAC helpers in
+`notification-service/src/auth.ts` are not connected to these CLI commands; they do not provide
+per-subscriber API-key authentication.
+
+Run the CLI only in a trusted operator environment. Issue #39's Bearer-key flow requires an HTTP API
+and persistent key storage to be designed and implemented before those operations can be
+authenticated as API requests.
 
 ### Subscribe to all events (email)
 
