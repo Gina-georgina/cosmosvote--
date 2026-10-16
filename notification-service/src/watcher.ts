@@ -90,15 +90,49 @@ async function processEvents(events: GovernanceEvent[]): Promise<void> {
   }
 }
 
+/** Set to true when stopWatcher() has been called. */
+let _stopping = false;
+
+/** Resolves when the in-flight poll (and its webhook deliveries) completes. */
+let _drainResolve: (() => void) | null = null;
+let _drainPromise: Promise<void> = Promise.resolve();
+
+/**
+ * Signal the watcher to stop scheduling new polls.
+ * Returns a promise that resolves once the current in-flight poll finishes,
+ * allowing all in-flight webhook deliveries and DB writes to complete.
+ */
+export function stopWatcher(): Promise<void> {
+  _stopping = true;
+  return _drainPromise;
+}
+
 export async function startWatcher(): Promise<void> {
   if (!CONTRACT_ID) {
     throw new Error('GOVERNANCE_CONTRACT_ID is not set.');
   }
 
+  _stopping = false;
+
   console.log(`[watcher] Starting. Contract: ${CONTRACT_ID}`);
   console.log(`[watcher] Polling Horizon every ${POLL_INTERVAL_MS}ms`);
 
   async function poll(): Promise<void> {
+    if (_stopping) {
+      console.log('[watcher] Stopping — skipping scheduled poll.');
+      if (_drainResolve) {
+        _drainResolve();
+        _drainResolve = null;
+      }
+      return;
+    }
+
+    // Create a new drain promise for this poll cycle so that stopWatcher()
+    // callers can await the completion of whatever is currently in-flight.
+    _drainPromise = new Promise<void>((resolve) => {
+      _drainResolve = resolve;
+    });
+
     const { cursor } = getStore();
     try {
       const { events, nextCursor } = await fetchNewEvents(cursor);
@@ -109,8 +143,18 @@ export async function startWatcher(): Promise<void> {
       }
     } catch (err) {
       console.error('[watcher] Poll error:', err);
+    } finally {
+      // Resolve the drain promise — all in-flight work for this cycle is done.
+      if (_drainResolve) {
+        _drainResolve();
+        _drainResolve = null;
+      }
     }
-    setTimeout(poll, POLL_INTERVAL_MS);
+
+    // Schedule the next poll only if we have not been asked to stop.
+    if (!_stopping) {
+      setTimeout(poll, POLL_INTERVAL_MS);
+    }
   }
 
   await poll();

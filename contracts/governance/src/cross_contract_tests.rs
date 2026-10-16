@@ -199,7 +199,7 @@ fn test_reentrant_cast_vote_is_blocked() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // Wire up the malicious token to point back at governance
     store_gov(&env, &gov_id);
@@ -238,7 +238,7 @@ fn test_reentrant_finalise_is_blocked() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // Wire up malicious token to governance
     fstore_gov(&env, &gov_id);
@@ -296,7 +296,7 @@ fn test_governance_intact_after_attack_attempts() {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None);
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &0u32);
 
     // Normal proposal lifecycle completes without issue
     let proposal_id = make_proposal(&gov, &env, &voter);

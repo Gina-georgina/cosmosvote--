@@ -166,4 +166,22 @@ impl GovernanceEvents {
             new_wasm_hash.clone(),
         );
     }
+
+    /// Emitted in `cast_vote` when a voter's weight exceeds the configured
+    /// `concentration_threshold_bps` fraction of total supply.
+    ///
+    /// Fields: `(proposal_id, voter, voter_weight, total_supply, threshold_bps)`
+    pub fn concentration_alert(
+        env: &Env,
+        proposal_id: u64,
+        voter: &Address,
+        voter_weight: i128,
+        total_supply: i128,
+        threshold_bps: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("conc_alt")),
+            (proposal_id, voter.clone(), voter_weight, total_supply, threshold_bps),
+        );
+    }
 }

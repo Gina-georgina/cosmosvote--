@@ -19,8 +19,8 @@ interface WalletState {
 }
 
 export const useWalletStore = create<WalletState>((set, get) => ({
-  walletAddress: null,
-  walletName: null,
+  walletAddress: sessionStorage.getItem('cosmosvote-wallet-address'),
+  walletName: sessionStorage.getItem('cosmosvote-wallet-name') as WalletName | null,
   tokenBalance: null,
   showModal: false,
 
@@ -46,6 +46,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
     if (!address) return;
 
+    sessionStorage.setItem('cosmosvote-wallet-address', address);
+    sessionStorage.setItem('cosmosvote-wallet-name', wallet);
     set({ walletAddress: address, walletName: wallet, showModal: false });
 
     fetchTokenBalance(address)
@@ -53,7 +55,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       .catch(() => set({ tokenBalance: null }));
   },
 
-  disconnect: () => set({ walletAddress: null, walletName: null, tokenBalance: null }),
+  disconnect: () => {
+    sessionStorage.removeItem('cosmosvote-wallet-address');
+    sessionStorage.removeItem('cosmosvote-wallet-name');
+    set({ walletAddress: null, walletName: null, tokenBalance: null });
+  },
 
   refreshBalance: async () => {
     const { walletAddress } = get();
