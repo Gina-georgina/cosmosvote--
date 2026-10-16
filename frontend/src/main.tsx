@@ -5,21 +5,25 @@ import App from './App';
 import { WalletProvider } from './WalletContext';
 import { validateConfig } from './config';
 import { ToastProvider } from './components/ToastContext';
+import { FaucetPage } from './components/FaucetPage';
 import { I18nProvider } from './i18n';
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element not found');
 
 try {
-  validateConfig();
+  const isFaucetRoute = window.location.pathname.replace(/\/$/, '') === '/faucet';
+  if (!isFaucetRoute) validateConfig();
   createRoot(root).render(
     <StrictMode>
       <I18nProvider>
-        <WalletProvider>
-          <ToastProvider>
-            <App />
-          </ToastProvider>
-        </WalletProvider>
+        <ToastProvider>
+          {isFaucetRoute ? <FaucetPage /> : <App />}
+        </ToastProvider>
       </I18nProvider>
     </StrictMode>
   );

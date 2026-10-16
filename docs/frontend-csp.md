@@ -4,21 +4,19 @@ This document describes recommended CSP directives and how to apply them for dev
 
 ## Production
 
-Add the following HTTP response header on your production web server (preferred) or use the equivalent `<meta http-equiv>` in the HTML:
+Production CloudFront responses receive the CSP from Terraform's response headers policy. Terraform provisions a rate-limited API Gateway/Lambda endpoint for CSP reports and retains sanitized report fields in CloudWatch for 14 days. Do not use a CSP meta tag: it cannot enforce `frame-ancestors` and is no longer present in `frontend/index.html`.
 
-Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'strict-dynamic' https:; connect-src 'self' https:; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data:;
+The policy limits scripts to same-origin files, and limits connections to the app, the supported Stellar testnet/mainnet RPC endpoints, and the configured faucet API origin. Inline styles remain enabled because the existing React UI uses style attributes; inline scripts are disallowed.
 
 Notes:
 - Use server headers where possible; they cannot be overridden by an attacker.
-- Avoid `'unsafe-inline'` and `'unsafe-eval'` in production when feasible.
+- Avoid `'unsafe-inline'` and `'unsafe-eval'` in production. They are not enabled for scripts.
 
 ## Development (Vite)
 
-Vite's dev server uses HMR which requires relaxed script rules. For local development, use a more permissive policy (only locally) such as:
+Vite's dev server uses HMR which requires local-only `unsafe-eval` and a WebSocket connection. `frontend/vite.config.ts` configures these only for development:
 
-Content-Security-Policy: default-src 'self' 'unsafe-eval' 'unsafe-inline' http://localhost:5173 ws://localhost:5173;
-
-Alternatively, keep the strict production meta tag in `index.html` and apply a development-only header replacement in your dev server configuration.
+`script-src 'self' 'unsafe-eval'` and `connect-src ... ws://localhost:5173`.
 
 ## Verifying
 

@@ -9,7 +9,8 @@ Health check configuration and remediation guide for deployed CosmosVote service
 | Service | Endpoint | Method | Expected Response |
 |---------|----------|--------|-------------------|
 | Frontend (Vite/React) | `http://<host>:3000/` | GET | HTTP 200 |
-| Notification Service | `http://<host>:8080/health` | GET | `{"status":"ok"}` |
+| Backend liveness | `http://<host>:8080/health` | GET | `{"status":"ok","uptime":<seconds>}` |
+| Backend readiness | `http://<host>:8080/ready` | GET | HTTP 200 when Soroban RPC is healthy; otherwise HTTP 503 |
 | Horizon RPC Connector | `https://<horizon-url>/` | GET | HTTP 200 + JSON |
 | Soroban RPC | `https://<rpc-url>/` | POST `getHealth` | `{"status":"healthy"}` |
 
@@ -29,7 +30,9 @@ curl -s -X POST https://<rpc-url> \
 
 ### Docker Compose Health Checks
 
-Add to `docker-compose.yml` under each service:
+The backend listens on `HEALTH_PORT` (default `8080`). Its health server is separate from the worker's RPC endpoint. The current Compose `dev` service is an interactive development container, not the backend process, so it cannot use these endpoints as its own healthcheck without starting the backend in that container.
+
+When running the backend as a service, configure its healthcheck as follows:
 
 ```yaml
 services:
@@ -40,12 +43,14 @@ services:
       timeout: 5s
       retries: 3
 
-  notification:
+  backend:
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+Use `/ready` for readiness probes. `/health` only indicates that the backend process is running. This backend has no database; `/ready` checks the configured Soroban RPC using `getHealth` and returns HTTP 503 if the RPC is unreachable or unhealthy.
 ```
 
 ### Cron-Based Probe Script
