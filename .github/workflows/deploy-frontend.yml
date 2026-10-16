@@ -36,6 +36,7 @@ jobs:
           VITE_TOKEN_CONTRACT_ID: ${{ vars.TOKEN_CONTRACT_ID }}
           VITE_STELLAR_NETWORK: ${{ vars.STELLAR_NETWORK || 'mainnet' }}
           VITE_STELLAR_RPC_URL: ${{ vars.STELLAR_RPC_URL }}
+          VITE_FAUCET_API_URL: ${{ vars.FAUCET_API_URL }}
         run: npm run build
         working-directory: frontend
 

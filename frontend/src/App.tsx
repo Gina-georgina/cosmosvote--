@@ -181,6 +181,9 @@ export default function App() {
           <h1 style={{ margin: 0, fontSize: '1.5rem' }}>🌌 CosmosVote</h1>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-header-sub)' }}>On-chain governance · {ACTIVE_NETWORK}</span>
         </div>
+        {ACTIVE_NETWORK === 'testnet' && (
+          <a href="/faucet" style={{ color: 'var(--text-header)', fontSize: '0.875rem' }}>Get Test Tokens</a>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <button
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}

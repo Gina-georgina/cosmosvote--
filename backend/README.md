@@ -48,3 +48,20 @@ npm start
 npm run dev   # run with ts-node (no build needed)
 npm test      # run tests
 ```
+
+## Testnet Token Faucet
+
+The optional faucet API runs separately from the notification worker:
+
+```bash
+export FAUCET_ENABLED=true
+export FAUCET_ALLOWED_ORIGIN=https://your-frontend.example
+export FAUCET_TOKEN_CONTRACT_ID=<testnet-token-contract-id>
+export FAUCET_ADMIN_SECRET_KEY=<testnet-admin-secret>
+npm run build
+npm run start:faucet
+```
+
+It exposes `POST /api/faucet/claim` with `{ "address": "G..." }`. The service signs only Soroban testnet transactions, mints `FAUCET_AMOUNT` base units, and permits one claim per wallet address every 24 hours. The SQLite database at `FAUCET_DB_PATH` must be on durable storage; losing it resets cooldown records. Keep the admin key in the deployment secret manager and fund its testnet account with XLM for transaction fees. Do not expose this service with a mainnet admin key.
+
+For local container testing, set `FAUCET_TOKEN_CONTRACT_ID` and `FAUCET_ADMIN_SECRET_KEY`, then run `docker compose --profile faucet up --build faucet`. The compose profile mounts a persistent `faucet-data` volume. Run one faucet instance against that SQLite volume; do not scale it across hosts.
