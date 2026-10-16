@@ -1,0 +1,45 @@
+name: Fuzz cast_vote (weekly)
+
+# Run on a weekly schedule (every Monday at 02:00 UTC) and on manual dispatch.
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_VERSION: "1.78.0"
+
+jobs:
+  fuzz-cast-vote:
+    name: Fuzz cast_vote tally invariants
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cast_vote fuzz / property tests
+        run: |
+          cargo test fuzz_cast_vote \
+            --package cosmosvote-governance \
+            --features testutils \
+            -- --nocapture
+
+      - name: Upload failing seeds as artifact (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failing-seeds
+          path: |
+            contracts/governance/.proptest-regressions/
+          retention-days: 30

@@ -644,3 +644,67 @@ fn test_pause_does_not_block_read_queries() {
     assert_eq!(token.allowance(&admin, &spender), 500);
     assert!(token.is_paused());
 }
+
+// ---------------------------------------------------------------------------
+// Delegation cycle detection (issue #63)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_delegate_cycle_a_to_b_b_to_a_fails() {
+    let env = Env::default();
+    let (token, admin, user_a) = setup(&env);
+    let user_b = Address::generate(&env);
+
+    token.transfer(&admin, &user_a, &1_000_000i128);
+    token.mint(&admin, &user_b, &1_000_000i128);
+
+    // A delegates to B — allowed
+    token.delegate(&user_a, &user_b);
+    assert_eq!(token.get_delegation(&user_a), Some(user_b.clone()));
+
+    // B attempts to delegate to A — must fail with DelegationCycle
+    let result = token.try_delegate(&user_b, &user_a);
+    assert_eq!(result, Err(Ok(ContractError::DelegationCycle)));
+}
+
+#[test]
+fn test_delegate_self_still_fails_with_cannot_delegate_self() {
+    let env = Env::default();
+    let (token, admin, user) = setup(&env);
+    token.transfer(&admin, &user, &1_000_000i128);
+
+    let result = token.try_delegate(&user, &user);
+    assert_eq!(result, Err(Ok(ContractError::CannotDelegateSelf)));
+}
+
+#[test]
+fn test_delegate_after_undelegate_allows_reverse() {
+    let env = Env::default();
+    let (token, admin, user_a) = setup(&env);
+    let user_b = Address::generate(&env);
+
+    token.transfer(&admin, &user_a, &1_000_000i128);
+    token.mint(&admin, &user_b, &1_000_000i128);
+
+    // A → B, then A undelegates, then B → A should succeed (no cycle)
+    token.delegate(&user_a, &user_b);
+    token.undelegate(&user_a);
+    token.delegate(&user_b, &user_a);
+    assert_eq!(token.get_delegation(&user_b), Some(user_a.clone()));
+}
+
+#[test]
+fn test_delegate_b_to_c_c_to_b_detected() {
+    let env = Env::default();
+    let (token, admin, user_b) = setup(&env);
+    let user_c = Address::generate(&env);
+
+    token.transfer(&admin, &user_b, &1_000_000i128);
+    token.mint(&admin, &user_c, &1_000_000i128);
+
+    // B → C first
+    token.delegate(&user_b, &user_c);
+    // C → B creates a cycle
+    let result = token.try_delegate(&user_c, &user_b);
+    assert_eq!(result, Err(Ok(ContractError::DelegationCycle)));
+}

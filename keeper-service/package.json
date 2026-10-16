@@ -1,0 +1,23 @@
+{
+  "name": "cosmosvote-keeper-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated keeper bot for finalizing expired proposals",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "type-check": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "12.3.0",
+    "axios": "1.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.2",
+    "ts-node": "10.9.2",
+    "typescript": "5.4.5"
+  }
+}

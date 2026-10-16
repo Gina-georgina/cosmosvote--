@@ -1,0 +1,55 @@
+name: Keeper Service - Auto Finalize Proposals
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      log_level:
+        description: 'Log level'
+        required: false
+        default: 'info'
+
+jobs:
+  keeper:
+    name: Run keeper service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: keeper-service/package-lock.json
+
+      - name: Install dependencies
+        working-directory: keeper-service
+        run: npm ci
+
+      - name: Run keeper service (single pass)
+        working-directory: keeper-service
+        env:
+          NETWORK: ${{ secrets.NETWORK || 'testnet' }}
+          SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
+          GOVERNANCE_CONTRACT_ID: ${{ secrets.GOVERNANCE_CONTRACT_ID }}
+          KEEPER_SECRET_KEY: ${{ secrets.KEEPER_SECRET_KEY }}
+          POLL_INTERVAL_MINUTES: 10
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: ${{ github.event.inputs.log_level || 'info' }}
+        run: |
+          # Run once and exit (workflow will re-run on schedule)
+          npm run build
+          timeout 5m npm start || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keeper-logs-${{ github.run_number }}
+          path: keeper-service/*.log
+          retention-days: 7
