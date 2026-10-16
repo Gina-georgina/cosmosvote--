@@ -18,6 +18,8 @@ mod test_helpers;
 #[cfg(test)]
 mod prop_tests;
 #[cfg(test)]
+mod fuzz_tests;
+#[cfg(test)]
 mod benchmarks;
 #[cfg(test)]
 mod event_tests;
