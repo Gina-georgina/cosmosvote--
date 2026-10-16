@@ -1,0 +1,213 @@
+.page {
+  min-height: 100vh;
+  color: #172b36;
+  background: #f3f7f4;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.header {
+  min-height: 68px;
+  padding: 0 5vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #123b35;
+  color: #f7f6ec;
+  font-family: system-ui, sans-serif;
+}
+
+.brand,
+.backLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.brand span {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #96c5ae;
+  border-radius: 3px;
+  color: #c6e5d2;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+}
+
+.backLink {
+  font-size: 0.875rem;
+}
+
+.backLink:hover,
+.backLink:focus-visible,
+.receiptLinks a:hover,
+.receiptLinks a:focus-visible {
+  text-decoration: underline;
+}
+
+.main {
+  width: min(100% - 2rem, 700px);
+  margin: 0 auto;
+  padding: clamp(3rem, 10vh, 7rem) 0;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: #397c65;
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.main h1 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.6rem, 7vw, 4.75rem);
+  line-height: 1;
+  font-weight: 500;
+}
+
+.description {
+  max-width: 48ch;
+  margin: 1.25rem 0 2rem;
+  color: #53666a;
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.claimSection {
+  max-width: 520px;
+  border-top: 1px solid #bfd0c9;
+  padding-top: 1.2rem;
+  font-family: system-ui, sans-serif;
+}
+
+.walletRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  color: #53666a;
+  font-size: 0.875rem;
+}
+
+.walletRow code,
+.hash {
+  color: #172b36;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.primaryButton {
+  min-height: 46px;
+  padding: 0.75rem 1.2rem;
+  border: 0;
+  border-radius: 4px;
+  background: #c85832;
+  color: white;
+  font: 700 0.95rem system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: #a94325;
+}
+
+.primaryButton:focus-visible {
+  outline: 3px solid #397c65;
+  outline-offset: 3px;
+}
+
+.primaryButton:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.connectSection {
+  font-family: system-ui, sans-serif;
+}
+
+.connectButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.secondaryButton {
+  min-height: 46px;
+  padding: 0.7rem 1rem;
+  border: 1px solid #397c65;
+  border-radius: 4px;
+  background: transparent;
+  color: #145e53;
+  font: 650 0.9rem system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.secondaryButton:focus-visible {
+  outline: 3px solid #397c65;
+  outline-offset: 3px;
+}
+
+.secondaryButton:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.error,
+.notice {
+  margin-top: 1rem;
+  color: #a22e21;
+  font-family: system-ui, sans-serif;
+}
+
+.success {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+  padding: 1rem 0;
+  border-top: 1px solid #bfd0c9;
+  font-family: system-ui, sans-serif;
+}
+
+.success strong {
+  color: #1c6a4e;
+}
+
+.receiptLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+}
+
+.receiptLinks a {
+  color: #145e53;
+  font-weight: 650;
+}
+
+@media (max-width: 480px) {
+  .header {
+    padding-inline: 1rem;
+  }
+
+  .backLink {
+    max-width: 8rem;
+    text-align: right;
+  }
+
+  .walletRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}

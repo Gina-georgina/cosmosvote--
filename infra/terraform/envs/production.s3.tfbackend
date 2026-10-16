@@ -1,0 +1,7 @@
+# Production environment backend config.
+# Usage: terraform init -backend-config="envs/production.s3.tfbackend"
+bucket         = "cosmosvote-tfstate"
+key            = "cosmosvote/production/terraform.tfstate"
+region         = "us-east-1"
+encrypt        = true
+dynamodb_table = "cosmosvote-tfstate-lock"
