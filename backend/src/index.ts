@@ -1,5 +1,6 @@
 import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { NotificationService } from './notificationService';
+import { logger } from './logger';
 
 // Must be called before any async work so unhandled rejections are captured.
 initErrorTracking();
@@ -12,9 +13,10 @@ const service = new NotificationService({
 });
 
 service.start();
-console.info('[cosmosvote-backend] notification service started');
+logger.info({ event: 'startup' }, 'notification service started');
 
 async function shutdown() {
+  logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
   await flushErrorTracking();
   process.exit(0);

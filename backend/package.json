@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@sentry/node": "8.54.0",
-    "axios": "1.7.9"
+    "axios": "1.7.9",
+    "pino": "9.6.0"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",
@@ -24,6 +25,8 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.ts"]
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ]
   }
 }
