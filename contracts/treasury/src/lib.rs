@@ -162,7 +162,7 @@ mod test {
 
         // Initialize governance with treasury address and token
         let gov = GovernanceContractClient::new(&env, &gov_id);
-        gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &Some(treasury_id));
+        gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &Some(treasury_id), &0u32);
 
         // Create a proposal that disburses 500 tokens to `recipient`
         let action = GovTreasuryAction {
