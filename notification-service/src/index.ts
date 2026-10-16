@@ -2,6 +2,7 @@
  * CosmosVote Notification Service – CLI entry point
  *
  * Issue #284 – multi-channel support
+ * Issue #43  – graceful shutdown with in-flight request draining
  *
  * Usage:
  *   npx ts-node src/index.ts start
@@ -41,11 +42,14 @@ try {
   // dotenv is optional
 }
 
-import { startWatcher } from './watcher';
+import { startWatcher, stopWatcher } from './watcher';
 import { addSubscriber, removeSubscriber, listSubscribers } from './subscriptions';
 import { GovernanceEventType } from './types';
 
 const ALL_EVENTS: GovernanceEventType[] = ['created', 'voted', 'final', 'exec', 'cancel'];
+
+/** Grace period (ms) to wait for in-flight webhook deliveries and DB writes. */
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 30_000);
 
 function parseArgs(): { cmd: string; args: string[] } {
   const [, , cmd = 'start', ...args] = process.argv;
@@ -62,11 +66,76 @@ function parseEvents(raw?: string): GovernanceEventType[] {
   return raw.split(',').map((e) => e.trim() as GovernanceEventType);
 }
 
+/**
+ * Flush the error-tracking service before exit.
+ *
+ * In production this would call e.g. Sentry.flush() or Datadog's drain.
+ * We expose a generic hook here so callers can inject the real flush.
+ */
+async function flushErrorTracking(): Promise<void> {
+  try {
+    // Dynamically require so the service is only imported when wired up.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const tracking = require('./errorTracking');
+    if (typeof tracking?.flush === 'function') {
+      await Promise.resolve(tracking.flush());
+    }
+  } catch {
+    // Error-tracking integration is optional; never block shutdown.
+  }
+}
+
+/**
+ * Graceful shutdown handler.
+ *
+ * 1. Signal the watcher to stop scheduling new polls.
+ * 2. Wait up to SHUTDOWN_TIMEOUT_MS for in-flight deliveries to complete.
+ * 3. Flush the error-tracking service.
+ * 4. Exit with the supplied code.
+ */
+async function shutdown(signal: string, exitCode = 0): Promise<void> {
+  console.log(`\n[shutdown] Received ${signal}. Initiating graceful shutdown (timeout: ${SHUTDOWN_TIMEOUT_MS}ms)…`);
+
+  // Step 1: ask the watcher to stop scheduling new polls and wait for the
+  //         current in-flight poll (and any pending webhook deliveries) to finish.
+  const drainPromise = stopWatcher();
+
+  // Step 2: race the drain against the hard timeout.
+  const timeoutPromise = new Promise<void>((resolve) => {
+    const t = setTimeout(() => {
+      console.warn(`[shutdown] Timeout reached after ${SHUTDOWN_TIMEOUT_MS}ms — forcing exit.`);
+      resolve();
+    }, SHUTDOWN_TIMEOUT_MS);
+    // Allow the Node.js event loop to exit even if the timeout fires.
+    if (t.unref) t.unref();
+  });
+
+  await Promise.race([drainPromise, timeoutPromise]);
+
+  // Step 3: flush error tracking (best-effort, bounded by its own internal timeout).
+  await flushErrorTracking();
+
+  console.log('[shutdown] Shutdown complete.');
+  process.exit(exitCode);
+}
+
+// ---------------------------------------------------------------------------
+// Register OS signal handlers only when running the `start` command.
+// ---------------------------------------------------------------------------
+function registerSignalHandlers(): void {
+  // SIGTERM is sent by process managers (Docker, systemd, Kubernetes).
+  process.once('SIGTERM', () => void shutdown('SIGTERM', 0));
+
+  // SIGINT is sent when the user presses Ctrl+C in a terminal.
+  process.once('SIGINT', () => void shutdown('SIGINT', 0));
+}
+
 async function main(): Promise<void> {
   const { cmd, args } = parseArgs();
 
   switch (cmd) {
     case 'start':
+      registerSignalHandlers();
       await startWatcher();
       break;
 

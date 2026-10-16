@@ -9,15 +9,19 @@
  *   - Any manually caught error      → call captureError() with breadcrumbs
  *
  * Set SENTRY_DSN in the environment to enable. If unset, errors are only
- * logged to stderr (safe for local development).
+ * logged locally (safe for local development).
+ *
+ * NOTE: SENTRY_DSN is intentionally excluded from pino log output via the
+ * redact config in logger.ts so it is never accidentally written to logs.
  */
 
 import * as Sentry from '@sentry/node';
+import { logger } from './logger';
 
 export function initErrorTracking(): void {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) {
-    console.warn('[error-tracking] SENTRY_DSN not set — Sentry disabled, logging to stderr only');
+    logger.warn({ event: 'sentry_disabled' }, 'SENTRY_DSN not set — Sentry disabled, logging to stderr only');
     return;
   }
 
@@ -28,7 +32,7 @@ export function initErrorTracking(): void {
     tracesSampleRate: 0.1,
   });
 
-  console.info('[error-tracking] Sentry initialised');
+  logger.info({ event: 'sentry_initialized' }, 'Sentry initialised');
 }
 
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
@@ -44,7 +48,7 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
   }
 
   // Always log locally so operators see it even without Sentry configured.
-  console.error('[error-tracking]', err.message, context ?? '');
+  logger.error({ err, ...context }, err.message);
 }
 
 export async function flushErrorTracking(timeoutMs = 2000): Promise<void> {

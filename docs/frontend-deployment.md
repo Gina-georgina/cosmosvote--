@@ -49,9 +49,14 @@ VITE_GOVERNANCE_CONTRACT_ID
 VITE_TOKEN_CONTRACT_ID
 VITE_STELLAR_NETWORK
 VITE_STELLAR_RPC_URL
+VITE_FAUCET_API_URL
 ```
 
 Use them in the frontend via `import.meta.env.VITE_*`.
+
+For testnet faucet deployment, set `FAUCET_API_URL` as a GitHub Actions variable to the HTTPS origin hosting the faucet service. The Terraform environment must use the same origin as `faucet_api_origin` so the production CSP permits faucet requests. `faucet_api_origin` is required when applying the frontend distribution; the CSP report collector endpoint is provisioned automatically.
+
+Deploy the faucet as a separate backend service using `backend/Dockerfile`. Set `FAUCET_ENABLED=true`, `FAUCET_ALLOWED_ORIGIN` to the frontend origin, `FAUCET_TOKEN_CONTRACT_ID` to the testnet token, and `FAUCET_ADMIN_SECRET_KEY` from the deployment secret manager. Mount durable storage at `/data` and run a single service instance so the SQLite 24-hour claim limit remains authoritative. Never configure a mainnet admin key.
 
 ## CI/CD
 
