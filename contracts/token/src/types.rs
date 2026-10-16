@@ -16,6 +16,7 @@ pub enum ContractError {
     CannotDelegateSelf   = 30,
     AlreadyDelegating    = 31,
     NotDelegating        = 32,
+    DelegationCycle      = 33,
     InvalidExpiry        = 40,
     NoPendingAdmin       = 50,
     NotPendingAdmin      = 51,

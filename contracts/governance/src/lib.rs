@@ -18,6 +18,8 @@ mod test_helpers;
 #[cfg(test)]
 mod prop_tests;
 #[cfg(test)]
+mod fuzz_tests;
+#[cfg(test)]
 mod benchmarks;
 #[cfg(test)]
 mod event_tests;
@@ -82,13 +84,15 @@ impl GovernanceContract {
 
     /// Initialize the governance contract.
     ///
-    /// * `admin`                – privileged address (execute / cancel / pause)
-    /// * `voting_token`         – SEP-41 governance token address
-    /// * `min_proposal_balance` – minimum token balance to create proposals (0 = none)
-    /// * `proposal_cooldown`    – seconds between proposals per address (0 = none)
-    /// * `min_quorum_bps`       – minimum quorum floor in basis points (100 = 1%)
-    /// * `restrict_admin_vote`  – if true, admin cannot vote on own proposals
-    /// * `treasury`             – optional treasury contract address
+    /// * `admin`                       – privileged address (execute / cancel / pause)
+    /// * `voting_token`                – SEP-41 governance token address
+    /// * `min_proposal_balance`        – minimum token balance to create proposals (0 = none)
+    /// * `proposal_cooldown`           – seconds between proposals per address (0 = none)
+    /// * `min_quorum_bps`              – minimum quorum floor in basis points (100 = 1%)
+    /// * `restrict_admin_vote`         – if true, admin cannot vote on own proposals
+    /// * `treasury`                    – optional treasury contract address
+    /// * `concentration_threshold_bps` – circuit breaker threshold in basis points
+    ///                                   (e.g. 5000 = 50%). 0 disables the circuit breaker.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -98,6 +102,7 @@ impl GovernanceContract {
         min_quorum_bps: u32,
         restrict_admin_vote: bool,
         treasury: Option<Address>,
+        concentration_threshold_bps: u32,
     ) -> Result<(), ContractError> {
         if GovernanceStorage::contract_state(&env) != ContractState::Uninitialized {
             return Err(ContractError::AlreadyInitialized);
@@ -116,6 +121,7 @@ impl GovernanceContract {
         GovernanceStorage::set_paused(&env, false);
         GovernanceStorage::set_contract_state(&env, ContractState::Ready);
         GovernanceStorage::set_version(&env, (1, 0, 0));
+        GovernanceStorage::set_concentration_threshold_bps(&env, concentration_threshold_bps);
 
         GovernanceEvents::initialized(&env, &admin, &voting_token);
         Ok(())
@@ -420,6 +426,40 @@ impl GovernanceContract {
         let weight = token_client.balance_at(&voter, &snapshot_ledger);
         if weight <= 0 {
             return Err(ContractError::NoVotingPower);
+        }
+
+        // -----------------------------------------------------------------------
+        // Circuit breaker: concentration check
+        //
+        // If a concentration_threshold_bps > 0 is set at initialization and
+        // the voter's weight exceeds that fraction of total supply, emit a
+        // `concentration_alert` event and pause the contract to require explicit
+        // admin review before voting continues.
+        //
+        // A threshold of 0 disables the circuit breaker entirely.
+        // -----------------------------------------------------------------------
+        let threshold_bps = GovernanceStorage::concentration_threshold_bps(&env);
+        if threshold_bps > 0 {
+            let total_supply = token_client.total_supply();
+            // weight / total_supply > threshold_bps / 10_000
+            // ⟺  weight * 10_000 > threshold_bps * total_supply
+            let lhs = weight.checked_mul(10_000).ok_or(ContractError::ArithmeticOverflow)?;
+            let rhs = (threshold_bps as i128)
+                .checked_mul(total_supply)
+                .ok_or(ContractError::ArithmeticOverflow)?;
+            if lhs > rhs {
+                GovernanceEvents::concentration_alert(
+                    &env,
+                    proposal_id,
+                    &voter,
+                    weight,
+                    total_supply,
+                    threshold_bps,
+                );
+                // Auto-pause: require explicit admin unpause for review.
+                GovernanceStorage::set_paused(&env, true);
+                return Err(ContractError::ContractPaused);
+            }
         }
 
         // Overflow is theoretically impossible: each voter's weight comes from their token
@@ -834,6 +874,17 @@ impl GovernanceContract {
         GovernanceStorage::set_paused(&env, true);
         GovernanceEvents::paused(&env, &admin);
         Ok(())
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        GovernanceStorage::paused(&env)
+    }
+
+    /// Returns the vote-concentration circuit breaker threshold in basis points.
+    /// A value of 0 means the circuit breaker is disabled.
+    pub fn get_concentration_threshold_bps(env: Env) -> u32 {
+        GovernanceStorage::concentration_threshold_bps(&env)
     }
 
     /// Unpause the contract. Admin only.
