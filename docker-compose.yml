@@ -55,6 +55,28 @@ services:
     volumes:
       - ./docker/rpc-proxy.conf:/etc/nginx/conf.d/default.conf:ro
 
+  faucet:
+    build:
+      context: ./backend
+    profiles:
+      - faucet
+    ports:
+      - "3001:3001"
+    environment:
+      FAUCET_ENABLED: "true"
+      FAUCET_PORT: "3001"
+      FAUCET_ALLOWED_ORIGIN: ${FAUCET_ALLOWED_ORIGIN:-http://localhost:5173}
+      FAUCET_TOKEN_CONTRACT_ID: ${FAUCET_TOKEN_CONTRACT_ID:-}
+      FAUCET_ADMIN_SECRET_KEY: ${FAUCET_ADMIN_SECRET_KEY:-}
+      FAUCET_RPC_URL: https://soroban-testnet.stellar.org
+      FAUCET_AMOUNT: ${FAUCET_AMOUNT:-1000000000}
+      FAUCET_TOKEN_DECIMALS: ${FAUCET_TOKEN_DECIMALS:-7}
+      FAUCET_DB_PATH: /data/faucet.sqlite
+    volumes:
+      - faucet-data:/data
+    restart: unless-stopped
+
 volumes:
   cargo-cache:
   target-cache:
+  faucet-data:

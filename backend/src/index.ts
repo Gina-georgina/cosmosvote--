@@ -1,4 +1,5 @@
 import { initErrorTracking, flushErrorTracking } from './errorTracking';
+import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
 
@@ -12,12 +13,19 @@ const service = new NotificationService({
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 6_000),
 });
 
+const healthServer = createHealthServer(() => service.checkReadiness());
+const healthPort = Number(process.env.HEALTH_PORT ?? 8080);
+healthServer.listen(healthPort, '0.0.0.0', () => {
+  console.info(`[cosmosvote-backend] health endpoints listening on port ${healthPort}`);
+});
+
 service.start();
 logger.info({ event: 'startup' }, 'notification service started');
 
 async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
+  healthServer.close();
   await flushErrorTracking();
   process.exit(0);
 }

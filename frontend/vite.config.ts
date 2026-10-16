@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     headers: {
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org; frame-ancestors 'none'; upgrade-insecure-requests;"
+      'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:3001 https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org ws://localhost:5173;"
     }
   },
   build: {

@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CosmosVote — Governance</title>
     <meta name="description" content="On-chain governance and voting on Stellar Soroban" />
-    <!-- Content Security Policy (CSP): production-ready policy. For dev (Vite HMR), see docs/frontend-csp.md -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'strict-dynamic' https:; connect-src 'self' https:; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data:;">
     <link rel="manifest" href="/manifest.json" />
   </head>
   <body>
@@ -17,10 +15,5 @@
     </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
-      }
-    </script>
   </body>
 </html>

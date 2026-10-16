@@ -14,7 +14,13 @@ frontend/.env.local
 # Backend
 backend/node_modules/
 backend/dist/
+backend/data/
+backend/*.sqlite*
 
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
 # Coverage
 coverage/
 
@@ -27,6 +33,10 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
 
 # Proptest snapshots (generated test artifacts)
 **/test_snapshots/

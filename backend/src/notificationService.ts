@@ -8,6 +8,18 @@ import { captureError } from './errorTracking';
 import { logger } from './logger';
 
 const MAX_POLL_FAILURES = 3;
+const MAX_WEBHOOK_RETRIES = 3;
+const INITIAL_WEBHOOK_RETRY_DELAY_MS = 1_000;
+
+function getHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { response?: { status?: unknown } }).response?.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export interface WebhookPayload {
   contractId: string;
@@ -29,6 +41,19 @@ export class NotificationService {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: NotificationServiceConfig) {}
+
+  async checkReadiness(): Promise<boolean> {
+    try {
+      const response = await axios.post<{ result?: { status?: string } }>(
+        `${this.config.rpcUrl.replace(/\/+$/, '')}/`,
+        { jsonrpc: '2.0', id: 1, method: 'getHealth' },
+        { timeout: 5_000 }
+      );
+      return response.data.result?.status === 'healthy';
+    } catch {
+      return false;
+    }
+  }
 
   async pollEvents(): Promise<WebhookPayload[]> {
     try {
@@ -73,28 +98,37 @@ export class NotificationService {
   }
 
   async deliverWebhook(payload: WebhookPayload): Promise<void> {
-    try {
-      await axios.post(this.config.webhookUrl, payload, { timeout: 5_000 });
-      logger.debug(
-        { event: 'webhook_delivered', contractEvent: payload.event, ledger: payload.ledger },
-        'webhook delivered'
-      );
-    } catch (err) {
-      captureError(err, {
-        context: 'webhook-delivery',
-        // webhookUrl is redacted by the pino redact config
-        webhookUrl: this.config.webhookUrl,
-        event: payload.event,
-      });
-      logger.error(
-        {
-          event: 'webhook_delivery_failed',
-          contractEvent: payload.event,
-          ledger: payload.ledger,
-          err,
-        },
-        'webhook delivery failed'
-      );
+    for (let attempt = 0; attempt <= MAX_WEBHOOK_RETRIES; attempt += 1) {
+      try {
+        await axios.post(this.config.webhookUrl, payload, { timeout: 5_000 });
+        return;
+      } catch (err) {
+        const statusCode = getHttpStatus(err);
+        const status = statusCode === undefined ? 'unknown status' : `HTTP ${statusCode}`;
+        const attemptNumber = attempt + 1;
+        const message = getErrorMessage(err);
+
+        if (attempt === MAX_WEBHOOK_RETRIES) {
+          console.error(
+            `[notification] Webhook delivery permanently failed after ${attemptNumber} attempts (${status}): ${message}`
+          );
+          captureError(err, {
+            context: 'webhook-delivery',
+            webhookUrl: this.config.webhookUrl,
+            event: payload.event,
+            attempts: attemptNumber,
+            statusCode,
+          });
+          return;
+        }
+
+        console.error(
+          `[notification] Webhook delivery attempt ${attemptNumber}/${MAX_WEBHOOK_RETRIES + 1} failed (${status}): ${message}`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, INITIAL_WEBHOOK_RETRY_DELAY_MS * 2 ** attempt)
+        );
+      }
     }
   }
 
