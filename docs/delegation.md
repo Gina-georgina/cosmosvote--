@@ -64,6 +64,25 @@ Alice votes Yes on a new proposal
 | `(token, delegate)` | `(owner, delegate_to)` | Delegation created |
 | `(token, undelegt)` | `owner` | Delegation removed |
 
+## Cycle Detection
+
+`delegate()` detects and rejects **direct delegation cycles** (A→B, B→A):
+
+- If A delegates to B, any subsequent attempt by B to delegate back to A
+  returns `DelegationCycle` (error code 33).
+- Self-delegation (A→A) continues to return `CannotDelegateSelf` (error code 30).
+
+```
+Alice delegates to Bob  → Ok
+Bob delegates to Alice  → Err(DelegationCycle)  ← rejected
+```
+
+**Multi-hop delegation is not supported.** The contract stores a single
+delegation target per address. `get_delegated_weight` accepts an explicit
+`delegators` list controlled by the caller and accumulates weight one level
+deep only. Callers must not supply cyclic delegator lists to
+`get_delegated_weight`.
+
 ## Error Codes
 
 | Code | Name | Description |
@@ -71,3 +90,4 @@ Alice votes Yes on a new proposal
 | 30 | `CannotDelegateSelf` | Owner tried to delegate to themselves |
 | 31 | `AlreadyDelegating` | Owner already has an active delegation |
 | 32 | `NotDelegating` | Undelegate called with no active delegation |
+| 33 | `DelegationCycle` | Delegation would create a direct cycle (A→B, B→A) |

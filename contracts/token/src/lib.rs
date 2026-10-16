@@ -287,18 +287,38 @@ impl TokenContract {
     ///
     /// The owner's token balance is retained; only voting weight is delegated.
     /// An owner can only delegate to one address at a time.
+    ///
+    /// # Cycle detection
+    /// Direct cycles (A→B when B already delegates to A) are rejected with
+    /// `DelegationCycle`. Multi-hop delegation (A→B→C) is **not supported** —
+    /// `get_delegated_weight` accepts an explicit delegators list and weight
+    /// is only accumulated one level deep. Callers must not pass cyclic
+    /// delegator lists to `get_delegated_weight`.
     pub fn delegate(
         env: Env,
         owner: Address,
         delegate_to: Address,
     ) -> Result<(), ContractError> {
         owner.require_auth();
+
+        // Guard: cannot delegate to self
         if owner == delegate_to {
             return Err(ContractError::CannotDelegateSelf);
         }
+
+        // Guard: already delegating to someone
         if TokenStorage::delegation(&env, &owner).is_some() {
             return Err(ContractError::AlreadyDelegating);
         }
+
+        // Guard: direct cycle — if delegate_to already delegates back to owner,
+        // setting owner→delegate_to would create A→B, B→A.
+        if let Some(existing) = TokenStorage::delegation(&env, &delegate_to) {
+            if existing == owner {
+                return Err(ContractError::DelegationCycle);
+            }
+        }
+
         TokenStorage::set_delegation(&env, &owner, &delegate_to);
         TokenEvents::delegated(&env, &owner, &delegate_to);
         Ok(())
