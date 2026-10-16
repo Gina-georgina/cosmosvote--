@@ -1,30 +1,31 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { Proposal, ProposalState } from './types';
-import { fetchAllProposals, fetchTokenBalance, fetchTokenDecimals, checkRpcReachability } from './api';
+import { fetchAllProposals, fetchTokenDecimals, checkRpcReachability } from './api';
 import { ProposalCard } from './components/ProposalCard';
 import { ProposalSkeleton } from './components/ProposalSkeleton';
 import { ProposalDetail } from './components/ProposalDetail';
 import { Pagination } from './components/Pagination';
-import { useToast } from './components/ToastContext';
+import { ConnectWalletModal } from './components/ConnectWalletModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { AriaLive } from './components/AriaLive';
 import { ACTIVE_NETWORK } from './config';
 import { formatTokenAmount, maskAddress } from './utils';
 import { useTheme } from './useTheme';
+import { useMeta } from './useMeta';
+import { useWallet } from './WalletContext';
 import './responsive.css';
-
-type ActiveTab = 'proposals' | 'dashboard' | 'treasury';
 
 const ALL_STATES: ProposalState[] = ['Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
 const PAGE_SIZE = 20;
-
-async function connect() {
-  // wallet connection placeholder
-}
 
 // Admin address — in production this would come from the contract or environment config
 const ADMIN_ADDRESS = import.meta.env.VITE_ADMIN_ADDRESS ?? null;
 
 export default function App() {
-  const { walletAddress, walletName, tokenBalance, showModal, openModal, disconnect } = useWallet();
+  // Wallet state comes exclusively from WalletContext (backed by Zustand walletStore).
+  // No local wallet state duplicates are created here.
+  const { walletAddress, tokenBalance, showModal, openModal, disconnect } = useWallet();
+
   const { theme, setTheme } = useTheme();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [decimals, setDecimals] = useState<number>(0);
@@ -35,23 +36,12 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<ProposalState | 'All'>('All');
   const [selected, setSelected] = useState<Proposal | null>(null);
-  const triggerRef = useRef<HTMLElement>(null);
-  // Pagination state — page is reset to 1 whenever the filter or search changes
-  const [page, setPage] = useState(1);
-  // Preserve scroll position when opening/closing proposal detail views
-  const scrollPositionRef = useRef<number>(0);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
-  const [decimals, setDecimals] = useState<number>(0);
   const [rpcWarning, setRpcWarning] = useState<string | null>(null);
   const [showFullAddress, setShowFullAddress] = useState(false);
-
-  const connect = () => {
-    const addr = prompt('Enter your Stellar address (G...):');
-    if (addr?.startsWith('G')) setWalletAddress(addr);
-  };
-
-  const disconnect = () => setWalletAddress(null);
+  const [page, setPage] = useState(1);
+  const triggerRef = useRef<HTMLElement>(null);
+  // Preserve scroll position when opening/closing proposal detail views
+  const scrollPositionRef = useRef<number>(0);
 
   useMeta(
     selected ? selected.title : 'Proposals',
@@ -59,35 +49,6 @@ export default function App() {
       ? `${selected.title} — ${selected.description.slice(0, 120)}`
       : 'Browse and vote on on-chain governance proposals for CosmosVote on Stellar Soroban.'
   );
-
-  const connect = () => {
-    const addr = prompt('Enter your Stellar address (G...):');
-    if (addr?.startsWith('G')) {
-      setWalletAddress(addr);
-      fetchTokenBalance(addr).then(setTokenBalance).catch(() => setTokenBalance(null));
-    }
-  };
-
-  useEffect(() => {
-    if (!walletAddress) { setTokenBalance(null); return; }
-    fetchTokenBalance(walletAddress).then(setTokenBalance).catch(() => setTokenBalance(null));
-  }, [walletAddress]);
-
-  const refreshProposals = () => {
-    fetchAllProposals().then(setProposals).catch(() => {});
-  };
-
-  const { walletAddress, tokenBalance, isConnecting, walletError, connect, retryConnect } = useWallet();
-
-  function connect() {
-    const addr = prompt(t('connectWallet') + ':');
-    if (addr?.startsWith('G')) setWalletAddress(addr);
-  }
-
-  useEffect(() => {
-    if (!walletAddress) { setTokenBalance(null); return; }
-    fetchTokenBalance(walletAddress).then(setTokenBalance).catch(() => setTokenBalance(null));
-  }, [walletAddress]);
 
   useEffect(() => {
     Promise.all([
@@ -103,42 +64,14 @@ export default function App() {
         setError(String(e));
         setAnnouncement('');
       })
-      .catch(e => setError(String(e)))
       .finally(() => { setLoading(false); setProgress(null); });
   }, []);
 
   useEffect(() => {
-    checkRpcReachability().catch(error => {
-      setRpcWarning(String(error));
+    checkRpcReachability().catch(err => {
+      setRpcWarning(String(err));
     });
   }, []);
-
-  const connect = () => {
-    const addr = prompt('Enter your Stellar address (G...):');
-    if (addr?.startsWith('G')) {
-      setWalletAddress(addr);
-      fetchTokenBalance(addr)
-        .then(setTokenBalance)
-        .catch(() => setTokenBalance(null));
-    }
-  };
-
-  function handleConnect() {
-    const addr = prompt('Enter your Stellar address (G...):');
-    if (addr?.startsWith('G')) setWalletAddress(addr);
-  }
-
-  function handleDisconnect() {
-    setWalletAddress(null);
-    setTokenBalance(null);
-    setActiveTab('proposals');
-  }
-
-  function handleProposalCreated(_proposalId: number) {
-    setShowCreateProposal(false);
-    // Refresh proposals list
-    fetchAllProposals().then(setProposals).catch(() => {});
-  }
 
   const filtered = useMemo(() => {
     return proposals.filter(p => {
@@ -166,9 +99,8 @@ export default function App() {
   }, [filtered, safePage]);
 
   const handleProposalCreated = (id: number) => {
-    setShowNewForm(false);
-    // In a real implementation, fetch the new proposal and navigate to it
     setAnnouncement(`Proposal #${id} created. Refreshing list…`);
+    fetchAllProposals().then(setProposals).catch(() => {});
   };
 
   return (
@@ -206,7 +138,9 @@ export default function App() {
                 {showFullAddress ? walletAddress : maskAddress(walletAddress)}
               </div>
               {tokenBalance !== null && (
-                <div className={styles.headerBalance}>{formatTokenAmount(tokenBalance, decimals)}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-header-sub)' }}>
+                  {formatTokenAmount(tokenBalance, decimals)}
+                </div>
               )}
               <button
                 onClick={disconnect}
@@ -220,98 +154,105 @@ export default function App() {
               onClick={openModal}
               style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer' }}
             >
-              {t.connect_wallet}
+              Connect Wallet
             </button>
           )}
         </div>
       </header>
 
       <ErrorBoundary>
-      <main style={{ maxWidth: 900, margin: '0 auto', padding: '2rem 1rem' }}>
-        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-          <input
-            type="search"
-            placeholder={t.search_placeholder}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: 200, padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-            aria-label="Search proposals"
-          />
-          <select
-            value={stateFilter}
-            onChange={e => setStateFilter(e.target.value as ProposalState | 'All')}
-            style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-            aria-label="Filter by state"
-          >
-            <option value="All">{t.filter_all_states}</option>
-            {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-
-        {rpcWarning && (
-          <div style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
-            <strong>RPC warning:</strong> {rpcWarning}
+        <main style={{ maxWidth: 900, margin: '0 auto', padding: '2rem 1rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            <input
+              type="search"
+              placeholder="Search proposals…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ flex: 1, minWidth: 200, padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+              aria-label="Search proposals"
+            />
+            <select
+              value={stateFilter}
+              onChange={e => setStateFilter(e.target.value as ProposalState | 'All')}
+              style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+              aria-label="Filter by state"
+            >
+              <option value="All">All States</option>
+              {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
           </div>
-        )}
 
-        {/* Stats bar */}
-        <div className="stats-bar">
-          {[
-            { label: 'Total', count: proposals.length, color: 'var(--text-primary)' },
-            { label: 'Active', count: proposals.filter(p => p.state === 'Active').length, color: '#2563eb' },
-            { label: 'Passed', count: proposals.filter(p => p.state === 'Passed').length, color: '#16a34a' },
-            { label: 'Executed', count: proposals.filter(p => p.state === 'Executed').length, color: '#7c3aed' },
-          ].map(({ label, count, color }) => (
-            <div key={label} style={{ background: 'var(--bg-stat)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.5rem 1rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 700, color }}>{count}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{label}</div>
+          {rpcWarning && (
+            <div style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
+              <strong>RPC warning:</strong> {rpcWarning}
             </div>
-
-        {error && <p style={{ textAlign: 'center', color: '#dc2626', marginBottom: '1rem' }}>Error: {error}</p>}
-
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          {loading && (
-            <>
-              {progress && (
-                <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
-                  Loading proposals… {progress.loaded}/{progress.total}
-                </p>
-              )}
-              <ProposalSkeleton />
-              <ProposalSkeleton />
-              <ProposalSkeleton />
-            </>
           )}
-          {!loading && !error && filtered.length === 0 && (
-            <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No proposals found.</p>
-          )}
-          {!loading && pagedProposals.map(p => (
-            <ProposalCard key={String(p.id)} proposal={p} decimals={decimals} onClick={(e) => {
-              triggerRef.current = e?.currentTarget as HTMLElement ?? null;
-              // Preserve scroll position so it can be restored when detail closes
-              scrollPositionRef.current = window.scrollY;
-              setSelected(p);
-            }} />
-          ))}
-        </div>
 
-        {!loading && filtered.length > 0 && (
-          <Pagination
-            page={safePage}
-            totalPages={totalPages}
-            totalCount={filtered.length}
-            pageSize={PAGE_SIZE}
-            onPrev={() => {
-              setPage(p => Math.max(1, p - 1));
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onNext={() => {
-              setPage(p => Math.min(totalPages, p + 1));
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          />
-        )}
-      </main>
+          {/* Stats bar */}
+          <div className="stats-bar" style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            {[
+              { label: 'Total', count: proposals.length, color: 'var(--text-primary)' },
+              { label: 'Active', count: proposals.filter(p => p.state === 'Active').length, color: '#2563eb' },
+              { label: 'Passed', count: proposals.filter(p => p.state === 'Passed').length, color: '#16a34a' },
+              { label: 'Executed', count: proposals.filter(p => p.state === 'Executed').length, color: '#7c3aed' },
+            ].map(({ label, count, color }) => (
+              <div key={label} style={{ background: 'var(--bg-stat)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.5rem 1rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color }}>{count}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {error && <p style={{ textAlign: 'center', color: '#dc2626', marginBottom: '1rem' }}>Error: {error}</p>}
+
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {loading && (
+              <>
+                {progress && (
+                  <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
+                    Loading proposals… {progress.loaded}/{progress.total}
+                  </p>
+                )}
+                <ProposalSkeleton />
+                <ProposalSkeleton />
+                <ProposalSkeleton />
+              </>
+            )}
+            {!loading && !error && filtered.length === 0 && (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No proposals found.</p>
+            )}
+            {!loading && pagedProposals.map(p => (
+              <ProposalCard
+                key={String(p.id)}
+                proposal={p}
+                decimals={decimals}
+                onClick={(e) => {
+                  triggerRef.current = e?.currentTarget as HTMLElement ?? null;
+                  // Preserve scroll position so it can be restored when detail closes
+                  scrollPositionRef.current = window.scrollY;
+                  setSelected(p);
+                }}
+              />
+            ))}
+          </div>
+
+          {!loading && filtered.length > 0 && (
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              totalCount={filtered.length}
+              pageSize={PAGE_SIZE}
+              onPrev={() => {
+                setPage(p => Math.max(1, p - 1));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onNext={() => {
+                setPage(p => Math.min(totalPages, p + 1));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          )}
+        </main>
       </ErrorBoundary>
 
       {/* ── Modals ── */}
