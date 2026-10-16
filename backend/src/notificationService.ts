@@ -41,6 +41,19 @@ export class NotificationService {
 
   constructor(private readonly config: NotificationServiceConfig) {}
 
+  async checkReadiness(): Promise<boolean> {
+    try {
+      const response = await axios.post<{ result?: { status?: string } }>(
+        `${this.config.rpcUrl.replace(/\/+$/, '')}/`,
+        { jsonrpc: '2.0', id: 1, method: 'getHealth' },
+        { timeout: 5_000 }
+      );
+      return response.data.result?.status === 'healthy';
+    } catch {
+      return false;
+    }
+  }
+
   async pollEvents(): Promise<WebhookPayload[]> {
     try {
       const response = await axios.post<{ events: WebhookPayload[] }>(
