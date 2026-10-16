@@ -12,3 +12,12 @@ variable "environment" {
     error_message = "environment must be staging or production"
   }
 }
+
+variable "faucet_api_origin" {
+  description = "HTTPS origin of the faucet API allowed by the frontend CSP"
+  type        = string
+  validation {
+    condition     = can(regex("^https://[^/]+$", var.faucet_api_origin))
+    error_message = "faucet_api_origin must be an HTTPS origin without a path."
+  }
+}
