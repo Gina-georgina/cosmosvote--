@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -16,6 +20,12 @@ provider "aws" {
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
+}
+
+data "archive_file" "csp_reporter" {
+  type        = "zip"
+  source_file = "${path.module}/csp_reporter.py"
+  output_path = "${path.root}/.terraform/csp_reporter.zip"
 }
 
 locals {
@@ -48,6 +58,111 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
+}
+
+resource "aws_iam_role" "csp_reporter" {
+  name = "cosmosvote-csp-reporter-${var.environment}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "csp_reporter" {
+  name              = "/aws/lambda/cosmosvote-csp-reporter-${var.environment}"
+  retention_in_days = 14
+}
+
+resource "aws_iam_role_policy" "csp_reporter_logs" {
+  name = "write-csp-report-logs"
+  role = aws_iam_role.csp_reporter.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource = "${aws_cloudwatch_log_group.csp_reporter.arn}:*"
+    }]
+  })
+}
+
+resource "aws_lambda_function" "csp_reporter" {
+  function_name    = "cosmosvote-csp-reporter-${var.environment}"
+  role             = aws_iam_role.csp_reporter.arn
+  runtime          = "python3.12"
+  handler          = "csp_reporter.handler"
+  filename         = data.archive_file.csp_reporter.output_path
+  source_code_hash = data.archive_file.csp_reporter.output_base64sha256
+  timeout          = 5
+  memory_size      = 128
+  depends_on       = [aws_cloudwatch_log_group.csp_reporter, aws_iam_role_policy.csp_reporter_logs]
+}
+
+resource "aws_apigatewayv2_api" "csp_reports" {
+  name          = "cosmosvote-csp-reports-${var.environment}"
+  protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_integration" "csp_reporter" {
+  api_id                 = aws_apigatewayv2_api.csp_reports.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.csp_reporter.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "csp_reports" {
+  api_id    = aws_apigatewayv2_api.csp_reports.id
+  route_key = "POST /report"
+  target    = "integrations/${aws_apigatewayv2_integration.csp_reporter.id}"
+}
+
+resource "aws_apigatewayv2_stage" "csp_reports" {
+  api_id      = aws_apigatewayv2_api.csp_reports.id
+  name        = "$default"
+  auto_deploy = true
+
+  default_route_settings {
+    throttling_burst_limit = 20
+    throttling_rate_limit  = 10
+  }
+}
+
+resource "aws_lambda_permission" "csp_reporter" {
+  statement_id  = "AllowCspReportApiInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.csp_reporter.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.csp_reports.execution_arn}/*/POST/report"
+}
+
+resource "aws_cloudfront_response_headers_policy" "frontend_security" {
+  name = "cosmosvote-security-${var.environment}"
+
+  security_headers_config {
+    content_security_policy {
+      content_security_policy = "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org ${var.faucet_api_origin}; upgrade-insecure-requests; report-uri ${aws_apigatewayv2_api.csp_reports.api_endpoint}/report;"
+      override                  = true
+    }
+    content_type_options { override = true }
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      preload                    = true
+      override                   = true
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
@@ -88,6 +203,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.frontend_security.id
 
     forwarded_values {
       query_string = false
