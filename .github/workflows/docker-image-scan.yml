@@ -19,13 +19,13 @@ jobs:
     name: Scan Backend Docker Image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build backend image
         run: docker build -t cosmosvote-backend:${{ github.sha }} .
 
       - name: Run Trivy scan on backend image
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
         with:
           image-ref: cosmosvote-backend:${{ github.sha }}
           format: table
@@ -37,14 +37,14 @@ jobs:
     name: Scan Frontend Docker Image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build frontend image
         run: docker build -t cosmosvote-frontend:${{ github.sha }} ./frontend
         continue-on-error: true
 
       - name: Run Trivy filesystem scan on frontend
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
         with:
           scan-type: fs
           scan-ref: ./frontend

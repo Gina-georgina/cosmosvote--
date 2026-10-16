@@ -133,6 +133,81 @@ Or declare a `terraform.tfvars` file locally (add to `.gitignore`) for developer
 
 ---
 
+## Remote State Backend (S3 + DynamoDB)
+
+Terraform state is stored remotely in S3 with DynamoDB-based locking to prevent concurrent `apply` conflicts.
+
+### Resources
+
+| Resource | Name |
+|----------|------|
+| S3 bucket | `cosmosvote-tfstate` |
+| DynamoDB lock table | `cosmosvote-tfstate-lock` |
+| State key (staging) | `cosmosvote/staging/terraform.tfstate` |
+| State key (production) | `cosmosvote/production/terraform.tfstate` |
+
+### One-Time Bootstrap
+
+Run the following commands **once** per AWS account, before calling `terraform init` for the first time:
+
+```bash
+# 1. Create the state bucket (us-east-1)
+aws s3api create-bucket \
+  --bucket cosmosvote-tfstate \
+  --region us-east-1
+
+# 2. Enable versioning (allows state rollback)
+aws s3api put-bucket-versioning \
+  --bucket cosmosvote-tfstate \
+  --versioning-configuration Status=Enabled
+
+# 3. Enable server-side encryption
+aws s3api put-bucket-encryption \
+  --bucket cosmosvote-tfstate \
+  --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+# 4. Block all public access
+aws s3api put-public-access-block \
+  --bucket cosmosvote-tfstate \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+# 5. Create the DynamoDB lock table
+aws dynamodb create-table \
+  --table-name cosmosvote-tfstate-lock \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-east-1
+```
+
+### Initializing with a Backend Config
+
+Backend configuration is split per environment in `infra/terraform/envs/`:
+
+```bash
+# Staging
+terraform init -backend-config="envs/staging.s3.tfbackend"
+
+# Production
+terraform init -backend-config="envs/production.s3.tfbackend"
+```
+
+Each `.s3.tfbackend` file sets the correct `key` path for that environment so staging and production state are stored separately under the same bucket.
+
+### State Locking
+
+The `dynamodb_table = "cosmosvote-tfstate-lock"` entry in the backend block enables automatic state locking. Terraform acquires a lock before every `plan` and `apply`, and releases it when the operation completes. If a process is interrupted, run:
+
+```bash
+terraform force-unlock <LOCK_ID>
+```
+
+with the lock ID printed in the error message.
+
+---
+
 ## State Management
 
 | Environment | Recommended Backend |

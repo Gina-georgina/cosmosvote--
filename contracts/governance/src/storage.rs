@@ -49,6 +49,8 @@ pub enum InstanceKey {
     Version,
     ContractState,
     Paused,
+    /// Basis-points threshold for vote-concentration circuit breaker (0 = disabled).
+    ConcentrationThresholdBps,
 }
 
 #[soroban_sdk::contracttype]
@@ -177,6 +179,20 @@ impl GovernanceStorage {
     }
     pub fn set_version(env: &Env, v: (u32, u32, u32)) {
         env.storage().instance().set(&InstanceKey::Version, &v);
+    }
+
+    /// Returns the vote-concentration circuit breaker threshold in basis points.
+    /// A value of 0 means the circuit breaker is disabled.
+    pub fn concentration_threshold_bps(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&InstanceKey::ConcentrationThresholdBps)
+            .unwrap_or(0)
+    }
+    pub fn set_concentration_threshold_bps(env: &Env, v: u32) {
+        env.storage()
+            .instance()
+            .set(&InstanceKey::ConcentrationThresholdBps, &v);
     }
 
     // --- Persistent ---

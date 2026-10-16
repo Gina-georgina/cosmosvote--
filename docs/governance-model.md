@@ -172,6 +172,78 @@ After end_time, anyone calls finalise():
 
 ---
 
+## Circuit Breaker: Vote Concentration Auto-Pause
+
+CosmosVote includes an optional circuit breaker that automatically pauses the contract when a single voter's weight represents an anomalously large fraction of the total token supply.
+
+### Configuration
+
+The circuit breaker is configured at contract initialization via `concentration_threshold_bps`:
+
+| Value | Behaviour |
+|-------|-----------|
+| `0` | Circuit breaker **disabled** — no concentration check is performed |
+| `5000` | Triggers when voter weight > 50% of total supply |
+| `3000` | Triggers when voter weight > 30% of total supply |
+| `1` – `9999` | Any basis-point threshold > 0 enables the circuit breaker |
+
+### Trigger Condition
+
+In `cast_vote`, after determining the voter's weight:
+
+```
+if concentration_threshold_bps > 0:
+    if voter_weight * 10_000 > threshold_bps * total_supply:
+        emit concentration_alert event
+        pause contract
+        return Err(ContractPaused)
+```
+
+The check is strictly greater-than (`>`). A voter holding exactly the threshold fraction can still vote.
+
+### Behaviour When Triggered
+
+1. A `concentration_alert` event is emitted with `(proposal_id, voter, voter_weight, total_supply, threshold_bps)`.
+2. The contract is **automatically paused** — `cast_vote`, `create_proposal`, and `finalise` are blocked for all participants until admin review.
+3. The triggering vote is **not recorded** — the voter's cast is rejected with `ContractPaused`.
+4. The admin must call `unpause()` explicitly after reviewing the situation.
+
+### Pause Behaviour
+
+| Operation | Blocked when paused |
+|-----------|---------------------|
+| `cast_vote` | ✓ |
+| `create_proposal` | ✓ |
+| `finalise` | ✓ |
+| `execute`, `cancel` | ✗ (admin can still finalize terminal actions) |
+| `unpause` | ✗ (admin unblocks the contract) |
+
+### Example
+
+```
+total_supply = 1,000,000,000 VOTE
+concentration_threshold_bps = 5000  (50%)
+
+Voter A holds 600,000,000 VOTE (60% of supply)
+Voter A calls cast_vote(...)
+
+  → 600_000_000 * 10_000 = 6_000_000_000_000
+  → 5000 * 1_000_000_000 = 5_000_000_000_000
+  → 6T > 5T → TRIGGERED
+
+  concentration_alert emitted
+  contract auto-paused
+  cast_vote returns Err(ContractPaused)
+
+Admin reviews, calls unpause() to resume normal voting.
+```
+
+### Disabling the Circuit Breaker
+
+Set `concentration_threshold_bps = 0` at initialization. No concentration check is performed and no auto-pause occurs regardless of voter weight.
+
+---
+
 ## Related Docs
 
 - [`lifecycle.md`](./lifecycle.md) — state machine quick reference
