@@ -1,20 +1,24 @@
+import { loadEnv } from './env';
 import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
 
+// Validate env vars before anything else — fails fast with a clear message.
+const env = loadEnv();
+
 // Must be called before any async work so unhandled rejections are captured.
 initErrorTracking();
 
 const service = new NotificationService({
-  rpcUrl: process.env.STELLAR_RPC_URL ?? 'http://localhost:8000',
-  contractId: process.env.GOVERNANCE_CONTRACT_ID ?? '',
-  webhookUrl: process.env.WEBHOOK_URL ?? '',
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 6_000),
+  rpcUrl: env.STELLAR_RPC_URL,
+  contractId: env.GOVERNANCE_CONTRACT_ID,
+  webhookUrl: env.WEBHOOK_URL,
+  pollIntervalMs: env.POLL_INTERVAL_MS,
 });
 
 const healthServer = createHealthServer(() => service.checkReadiness());
-const healthPort = Number(process.env.HEALTH_PORT ?? 8080);
+const healthPort = env.HEALTH_PORT;
 healthServer.listen(healthPort, '0.0.0.0', () => {
   console.info(`[cosmosvote-backend] health endpoints listening on port ${healthPort}`);
 });
