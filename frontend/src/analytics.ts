@@ -21,6 +21,16 @@ function isAnalyticsAllowed(): boolean {
     return false;
   }
 }
+
+// Drop any queued events when consent is not (or no longer) granted, so that
+// clearing consent also prevents previously buffered events from being sent.
+function discardQueueIfNotAllowed(): void {
+  if (isAnalyticsAllowed()) return;
+  if (queue.length) {
+    queue = [];
+    persist();
+  }
+}
 const IS_DEV = import.meta.env.DEV;
 const BATCH_SIZE = 10;
 const FLUSH_INTERVAL_MS = 30_000;
@@ -56,6 +66,11 @@ function persist() {
 }
 
 async function flush() {
+  // Re-check consent on every flush; reject/cleared consent blocks sending.
+  if (!isAnalyticsAllowed()) {
+    discardQueueIfNotAllowed();
+    return;
+  }
   if (!queue.length) return;
   const batch = queue.splice(0, queue.length);
   persist();
@@ -82,7 +97,11 @@ export function trackEvent(
   name: string,
   props?: Record<string, string | number>
 ): void {
-  if (!isAnalyticsAllowed()) return;
+  // Consent is checked before every event; absent/rejected consent blocks all.
+  if (!isAnalyticsAllowed()) {
+    discardQueueIfNotAllowed();
+    return;
+  }
   queue.push({ name, props, sessionId: SESSION_ID, ts: Date.now() });
   persist();
   if (queue.length >= BATCH_SIZE) flush();
@@ -92,8 +111,12 @@ export function trackEvent(
 if (ENABLED) {
   setInterval(() => {
     if (isAnalyticsAllowed()) flush();
+    else discardQueueIfNotAllowed();
   }, FLUSH_INTERVAL_MS);
   window.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && isAnalyticsAllowed()) flush();
+    if (document.visibilityState === "hidden") {
+      if (isAnalyticsAllowed()) flush();
+      else discardQueueIfNotAllowed();
+    }
   });
 }

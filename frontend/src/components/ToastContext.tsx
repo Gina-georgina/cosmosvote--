@@ -47,6 +47,11 @@ const ICONS: Record<ToastType, string> = {
   error: '❌',
 };
 
+function truncateHash(hash: string): string {
+  if (hash.length <= 12) return hash;
+  return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { toasts: [], nextId: 0 });
 
@@ -92,9 +97,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 href={explorerTxUrl(t.txHash)}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: '#bfdbfe', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                title={t.txHash}
+                aria-label={`View transaction ${t.txHash} on Stellar explorer`}
+                style={{ color: '#bfdbfe', fontSize: '0.75rem', whiteSpace: 'nowrap', fontFamily: 'monospace' }}
               >
-                View tx ↗
+                {truncateHash(t.txHash)} ↗
               </a>
             )}
             <button

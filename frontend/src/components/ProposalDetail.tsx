@@ -23,6 +23,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { formatTokenAmount, maskAddress, sanitizeWalletMessage } from '../utils';
 import { explorerAccountUrl } from '../config';
 import { usePolling } from '../hooks/usePolling';
+import { useToast } from '../context/ToastContext';
 
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
@@ -58,6 +59,8 @@ const VOTE_CONFIG: Array<{
 export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddress, onClose, triggerRef }: Props) {
   // Get signTransaction from the wallet store so votes can be signed by the real wallet.
   const { signTransaction } = useWallet();
+  // Toast notifications — used to surface the on-chain transaction hash after a vote.
+  const { notify } = useToast();
 
   const [hasVoted, setHasVoted] = useState<boolean | null>(null);
   const [voteRecord, setVoteRecord] = useState<{ vote: string; weight: bigint } | null>(null);
@@ -232,18 +235,21 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
     setVoteError(null);
     setVoteConfirmation(null);
     try {
-      await castVote(walletAddress, Number(p.id), voteInput, signTransaction);
+      const txHash = await castVote(walletAddress, Number(p.id), voteInput, signTransaction);
       setHasVoted(true);
       const voteLabel =
         typeof voteInput === 'object' && 'choice' in voteInput
           ? (safeChoices[voteInput.choice] ?? `Choice ${voteInput.choice}`)
           : voteInput;
       setVoteRecord({ vote: voteLabel, weight: BigInt(0) });
-      setVoteConfirmation(
-        sanitizeWalletMessage(
-          `Your vote "${voteLabel}" on proposal #${String(p.id)} has been submitted.`,
-        ),
+      const confirmationMessage = sanitizeWalletMessage(
+        `Your vote "${voteLabel}" on proposal #${String(p.id)} has been submitted.`,
       );
+      setVoteConfirmation(confirmationMessage);
+      // Surface the transaction hash in a toast so users can verify their vote on-chain.
+      if (txHash) {
+        notify('success', confirmationMessage, txHash);
+      }
     } catch (e) {
       setVoteError(`Vote failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
@@ -277,6 +283,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close proposal detail dialog"
+            className="no-print"
             style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
           >×</button>
         </div>
@@ -286,7 +293,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Discussion link — shown only when discussion_url is a valid HTTPS URL */}
         {p.discussion_url && /^https:\/\/.+/.test(p.discussion_url) && (
-          <p style={{ marginBottom: '1rem' }}>
+          <p className="no-print" style={{ marginBottom: '1rem' }}>
             <a
               href={p.discussion_url}
               target="_blank"
@@ -350,11 +357,12 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Live tally — updated via polling while Active */}
         {isProposalActive && (
-          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-vote-cell, #f9fafb)', borderRadius: 8, border: '1px solid var(--border-color, #e5e7eb)' }}>
+          <div className="print-tally" style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-vote-cell, #f9fafb)', borderRadius: 8, border: '1px solid var(--border-color, #e5e7eb)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>Live Tally</span>
               {secondsAgo !== null && (
                 <span
+                  className="no-print"
                   aria-live="polite"
                   aria-atomic="true"
                   style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}
@@ -414,7 +422,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* ── Vote section ── */}
         {walletAddress && (
-          <div style={{ padding: '0.75rem', background: '#f0f9ff', borderRadius: 8, fontSize: '0.875rem', marginBottom: '1rem' }}>
+          <div className="no-print" style={{ padding: '0.75rem', background: '#f0f9ff', borderRadius: 8, fontSize: '0.875rem', marginBottom: '1rem' }}>
             {/* Voting power panel — issue #20 */}
             {hasVoted === false && isProposalActive && (
               <div
@@ -648,7 +656,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Connect wallet prompt */}
         {!walletAddress && (
-          <div style={{ padding: '0.75rem', background: '#fef3c7', borderRadius: 8, fontSize: '0.875rem', color: '#92400e' }}>
+          <div className="no-print" style={{ padding: '0.75rem', background: '#fef3c7', borderRadius: 8, fontSize: '0.875rem', color: '#92400e' }}>
             ℹ️ Connect your wallet to vote on this proposal
           </div>
         )}
@@ -658,16 +666,19 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             users can see an estimate before connecting. When walletAddress is
             present the preview reflects the user's pending vote in real time. */}
         {isProposalActive && walletAddress && hasVoted === false && (
-          <VoteSimulationPreview
-            proposalId={Number(p.id)}
-            walletAddress={walletAddress}
-          />
+          <div className="no-print">
+            <VoteSimulationPreview
+              proposalId={Number(p.id)}
+              walletAddress={walletAddress}
+            />
+          </div>
         )}
 
         {/* Already voted confirmation (when loaded from chain, not just submitted) */}
         {walletAddress && hasVoted && !voteConfirmation && voteRecord && (
           <div
             role="status"
+            className="no-print"
             style={{ marginTop: '1rem', padding: '0.75rem', background: '#e0e7ff', borderRadius: 8, fontSize: '0.875rem', color: '#3730a3' }}
           >
             ✓ You have already voted <strong>{voteRecord.vote}</strong> on this proposal
@@ -676,14 +687,14 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Proposal not active */}
         {walletAddress && !isProposalActive && (
-          <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
+          <div className="no-print" style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
             ℹ️ This proposal is not active and cannot receive new votes
           </div>
         )}
 
         {/* Voting not yet open or closed */}
         {walletAddress && isProposalActive && !votingOpen && (
-          <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
+          <div className="no-print" style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
             ℹ️ Voting is not open yet or has ended for this proposal
           </div>
         )}

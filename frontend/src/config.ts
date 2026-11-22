@@ -36,6 +36,12 @@ export function explorerTxUrl(hash: string): string {
   return `${explorerBase}/tx/${hash}`;
 }
 
+export function truncateTxHash(hash: string, head = 6, tail = 6): string {
+  if (!hash) return '';
+  if (hash.length <= head + tail + 1) return hash;
+  return `${hash.slice(0, head)}…${hash.slice(-tail)}`;
+}
+
 export function validateConfig() {
   const errors: string[] = [];
   
