@@ -404,6 +404,12 @@ impl GovernanceContract {
     // -----------------------------------------------------------------------
 
     /// Cast a vote on an active proposal.
+    ///
+    /// **Vote changes are not supported.** Once a vote has been recorded for a
+    /// voter on a proposal, calling `cast_vote` again returns
+    /// `ContractError::AlreadyVoted`. To alter a vote, use `retract_vote`
+    /// followed by a fresh `cast_vote`, or use `change_vote` (which rejects
+    /// no-op changes with `ContractError::VoteAlreadySame`, error 29).
     pub fn cast_vote(
         env: Env,
         voter: Address,
@@ -588,6 +594,10 @@ impl GovernanceContract {
     }
 
     /// Change a previously cast vote on an active proposal.
+    ///
+    /// Vote changes are supported only through this entrypoint. Attempting to
+    /// change a vote to the value already recorded is a no-op and is rejected
+    /// with `ContractError::VoteAlreadySame` (error 29). See `docs/errors.md`.
     pub fn change_vote(
         env: Env,
         voter: Address,
@@ -614,6 +624,8 @@ impl GovernanceContract {
         let record = GovernanceStorage::vote_record(&env, proposal_id, &voter)
             .ok_or(ContractError::VoteNotFound)?;
 
+        // Re-casting the same vote is not a supported change; surface it
+        // explicitly so callers can distinguish it from a successful update.
         if record.vote == new_vote {
             return Err(ContractError::VoteAlreadySame);
         }
@@ -745,6 +757,9 @@ impl GovernanceContract {
     }
 
     /// Cancel an active proposal. Admin only.
+    ///
+    /// The optional `reason` is persisted on the proposal and included in the
+    /// emitted `ProposalCancelled` event so off-chain indexers retain it.
     pub fn cancel(
         env: Env,
         admin: Address,
@@ -768,7 +783,13 @@ impl GovernanceContract {
         if active_count > 0 {
             GovernanceStorage::set_active_proposal_count(&env, active_count - 1);
         }
-        GovernanceEvents::proposal_cancelled(&env, proposal_id, &admin, proposal.voter_count, &reason);
+        GovernanceEvents::proposal_cancelled(
+            &env,
+            proposal_id,
+            &admin,
+            proposal.voter_count,
+            &reason,
+        );
         Ok(())
     }
 
@@ -1002,6 +1023,11 @@ impl GovernanceContract {
     }
 
     /// Update the admin vote restriction flag. Admin only.
+    ///
+    /// Requires authorization from the current admin, persists the new value,
+    /// and emits a `RestrictAdminVoteUpdated` event carrying the old and new
+    /// values. Allows governance policy to change (e.g. after an admin transfer
+    /// to a multisig) without redeploying the contract.
     pub fn set_restrict_admin_vote(
         env: Env,
         admin: Address,

@@ -168,6 +168,16 @@ impl TokenContract {
 
         let allowance_record = TokenStorage::allowance_record(&env, &from, &spender)
             .ok_or(ContractError::AllowanceExceeded)?;
+
+        // Treat an expired allowance as zero: if the current ledger sequence has
+        // passed the recorded expiry, the spender has no remaining allowance.
+        let current_ledger = env.ledger().sequence();
+        if current_ledger > allowance_record.expiry_ledger {
+            // Clear the stale entry so it does not accumulate indefinitely.
+            TokenStorage::set_allowance(&env, &from, &spender, 0, allowance_record.expiry_ledger);
+            return Err(ContractError::AllowanceExceeded);
+        }
+
         if allowance_record.amount < amount {
             return Err(ContractError::AllowanceExceeded);
         }
@@ -198,22 +208,28 @@ impl TokenContract {
     // -----------------------------------------------------------------------
 
     /// Approve `spender` to transfer up to `amount` tokens from `owner`.
+    ///
+    /// `expiry_ledger` is the ledger sequence after which the allowance is
+    /// treated as zero. When `None`, the allowance never expires (stored as
+    /// `u32::MAX`). An explicit expiry must be strictly greater than the
+    /// current ledger sequence.
     pub fn approve(
         env: Env,
         owner: Address,
         spender: Address,
         amount: i128,
-        expiry_ledger: u32,
+        expiry_ledger: Option<u32>,
     ) -> Result<(), ContractError> {
         owner.require_auth();
         if amount < 0 {
             return Err(ContractError::InvalidAmount);
         }
         let current_ledger = env.ledger().sequence();
-        if expiry_ledger <= current_ledger {
+        let resolved_expiry = expiry_ledger.unwrap_or(u32::MAX);
+        if resolved_expiry <= current_ledger {
             return Err(ContractError::InvalidExpiry);
         }
-        TokenStorage::set_allowance(&env, &owner, &spender, amount, expiry_ledger);
+        TokenStorage::set_allowance(&env, &owner, &spender, amount, resolved_expiry);
         TokenEvents::approval(&env, &owner, &spender, amount);
         Ok(())
     }

@@ -250,9 +250,9 @@ async function getVotingPower(
 
 | Field | Detail |
 |-------|--------|
-| **Trigger** | `change_vote()` is submitted with the same vote choice as the one already recorded. |
-| **Common causes** | UI state out of sync with on-chain state; user accidentally double-submitting without changing their choice. |
-| **Client action** | Fetch the current vote record with `get_vote()` and disable the submit button if the selected option matches the existing record. |
+| **Trigger** | A voter submits a vote with the same choice as the vote already recorded for them on this proposal. Vote changes are **not supported**: once a vote is cast it is final, and re-submitting the identical choice is rejected with this error rather than being treated as a no-op. |
+| **Common causes** | Double-clicking the vote button; retrying a transaction that already landed; UI state out of sync with on-chain state so the user re-submits their existing choice. |
+| **Client action** | Call `has_voted(proposal_id, voter)` and `get_vote()` before submitting. If a vote already exists, show "You have already voted" and disable the vote buttons — there is no supported way to change or replace a cast vote. |
 
 ---
 
@@ -378,7 +378,13 @@ async function getVotingPower(
 | 11 | `InvalidNewAdmin` | Invalid address passed to admin transfer. | Typo or wrong address type. | Validate with `StrKey.isValidEd25519PublicKey()`. |
 | 20 | `InvalidAmount` | Zero or negative transfer amount. | UI allowing 0-value sends. | Enforce `amount > 0` client-side. |
 | 21 | `InsufficientBalance` | Sender balance < transfer amount. | User has fewer tokens than requested. | Fetch balance before submitting. |
-| 22 | `AllowanceExceeded` | `transfer_from()` amount exceeds approved allowance. | Allowance not increased before spending. | Call `approve()` with sufficient allowance first. |
+| 22 | `AllowanceExceeded` | `transfer_from()` amount exceeds the approved allowance, or the allowance has expired. | Allowance not increased before spending; allowance's `expiry_ledger` has passed. | Call `approve()` with sufficient allowance and a future `expiry_ledger` first. |
+
+### Allowance expiry
+
+`approve(owner, spender, amount, expiry_ledger: Option<u32>)` accepts an optional ledger sequence at which the allowance expires. When `expiry_ledger` is `Some(n)` and the current ledger sequence is greater than or equal to `n`, the allowance is treated as **zero**: `transfer_from()` fails with `AllowanceExceeded` (code 22) and `allowance()` reports `0`. Passing `None` creates an allowance with no expiry.
+
+**Client action:** Always pass an explicit `expiry_ledger` (e.g. current ledger sequence + a bounded window) and re-approve before it lapses. Treat an expired allowance as no allowance at all.
 
 ---
 

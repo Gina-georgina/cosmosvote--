@@ -54,6 +54,12 @@ impl GovernanceEvents {
         );
     }
 
+    /// Emitted when a proposal is cancelled via `cancel()`.
+    ///
+    /// Fields: `(proposal_id, admin, voter_count, reason)` where `reason` is
+    /// the optional cancellation reason supplied by the admin. The `Option`
+    /// is preserved as-is so off-chain indexers can distinguish "no reason
+    /// given" (`None`) from an explicit empty string (`Some("")`).
     pub fn proposal_cancelled(
         env: &Env,
         proposal_id: u64,
@@ -61,13 +67,9 @@ impl GovernanceEvents {
         voter_count: u32,
         reason: &Option<String>,
     ) {
-        let reason_str = match reason {
-            Some(r) => r.clone(),
-            None => String::from_str(env, ""),
-        };
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("cancel")),
-            (proposal_id, admin.clone(), voter_count, reason_str),
+            (proposal_id, admin.clone(), voter_count, reason.clone()),
         );
     }
 
@@ -241,9 +243,13 @@ impl GovernanceEvents {
         );
     }
 
+    /// Emitted when the admin updates the `restrict_admin_vote` policy via
+    /// `set_restrict_admin_vote`.
+    ///
+    /// Fields: `(admin, old_value, new_value)`
     pub fn restrict_admin_vote_updated(env: &Env, admin: &Address, old_value: bool, new_value: bool) {
         env.events().publish(
-            (symbol_short!("gov"), symbol_short!("rest_vote")),
+            (symbol_short!("gov"), symbol_short!("restrict")),
             (admin.clone(), old_value, new_value),
         );
     }
