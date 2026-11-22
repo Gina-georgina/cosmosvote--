@@ -411,6 +411,30 @@ pub fn execute(env: Env, admin: Address, proposal_id: u64) -> Result<(), Contrac
 pub fn cancel(env: Env, admin: Address, proposal_id: u64, reason: Option<String>) -> Result<(), ContractError>
 ```
 
+### Query Functions
+
+```rust
+// Returns the current ProposalCount (monotonic proposal ID counter) from instance storage.
+// Use this to enumerate proposal IDs (IDs are 1..=proposal_count) without reading raw storage keys.
+pub fn proposal_count(env: Env) -> u64
+
+// Returns all current governance parameters in a single call.
+pub fn get_config(env: Env) -> GovernanceConfig
+```
+
+`GovernanceConfig` exposes the current governance parameters:
+
+```rust
+pub struct GovernanceConfig {
+    pub min_proposal_balance: i128, // Minimum token balance required to create a proposal
+    pub proposal_cooldown: u64,     // Seconds between proposals per proposer
+    pub restrict_admin_vote: bool,  // Admin vote restriction flag
+    pub min_quorum_bps: u32,        // Minimum quorum in basis points
+}
+```
+
+Both functions are read-only and require no authorization, making them safe to call from off-chain tooling and indexers.
+
 ### Admin Operations
 
 ```rust

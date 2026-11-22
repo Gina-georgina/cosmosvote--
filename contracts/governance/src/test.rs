@@ -1757,6 +1757,176 @@ fn test_proposal_count_persisted() {
     assert_eq!(gov.proposal_count(), 3);
 }
 
+/// Issue #442: proposal_count() query returns the current ProposalCount.
+#[test]
+fn test_proposal_count_query() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+
+    // No proposals yet
+    assert_eq!(gov.proposal_count(), 0u64);
+
+    // Count increments by one for each created proposal
+    make_proposal(&gov, &env, &voter);
+    assert_eq!(gov.proposal_count(), 1u64);
+
+    make_proposal(&gov, &env, &voter);
+    assert_eq!(gov.proposal_count(), 2u64);
+
+    make_proposal(&gov, &env, &voter);
+    assert_eq!(gov.proposal_count(), 3u64);
+}
+
+/// Issue #443: get_config() exposes all governance parameters.
+#[test]
+fn test_get_config_returns_all_governance_params() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let voter = Address::generate(&env);
+
+    let token_id = env.register(TokenContract, ());
+    let token = TokenContractClient::new(&env, &token_id);
+    token.initialize(
+        &admin,
+        &1_000_000_000i128,
+        &String::from_str(&env, "CosmosVote"),
+        &String::from_str(&env, "VOTE"),
+        &7u32,
+    );
+    token.mint(&admin, &voter, &10_000_000i128);
+
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+
+    let min_balance: i128 = 250_000;
+    let cooldown: u64 = 1_800;
+    let min_quorum_bps: u32 = 150; // 1.5%
+    let restrict_admin_vote: bool = true;
+    let concentration_threshold_bps: u32 = 4_000; // 40%
+
+    gov.initialize(
+        &admin,
+        &token_id,
+        &min_balance,
+        &cooldown,
+        &min_quorum_bps,
+        &restrict_admin_vote,
+        &None,
+        &concentration_threshold_bps,
+    );
+
+    let config = gov.get_config();
+    assert_eq!(config.admin, admin);
+    assert_eq!(config.voting_token, token_id);
+    assert_eq!(config.min_proposal_balance, min_balance);
+    assert_eq!(config.proposal_cooldown, cooldown);
+    assert_eq!(config.min_quorum_bps, min_quorum_bps);
+    assert_eq!(config.restrict_admin_vote, restrict_admin_vote);
+    assert_eq!(config.paused, false);
+}
+
+/// Issue #444: finalise() on a Passed proposal returns ProposalNotActive and does not mutate state.
+#[test]
+fn test_finalise_twice_on_passed_proposal_no_mutation() {
+    let env = Env::default();
+    let (gov, _, _, voter, voter2) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    gov.cast_vote(&voter2, &id, &Vote::No);
+    let proposal = gov.get_proposal(&id);
+    env.ledger().with_mut(|l| l.timestamp = proposal.end_time + 1);
+
+    gov.finalise(&id);
+    let after_first = gov.get_proposal(&id);
+    assert_eq!(after_first.state, ProposalState::Passed);
+
+    let result = gov.try_finalise(&id);
+    assert_eq!(result, Err(Ok(ContractError::ProposalNotActive)));
+
+    let after_second = gov.get_proposal(&id);
+    assert_eq!(after_second.state, ProposalState::Passed);
+    assert_eq!(after_second.votes_yes, after_first.votes_yes);
+    assert_eq!(after_second.votes_no, after_first.votes_no);
+    assert_eq!(after_second.votes_abstain, after_first.votes_abstain);
+    assert_eq!(after_second.voter_count, after_first.voter_count);
+}
+
+/// Issue #444: finalise() on a Rejected proposal returns ProposalNotActive and does not mutate state.
+#[test]
+fn test_finalise_twice_on_rejected_proposal_no_mutation() {
+    let env = Env::default();
+    let (gov, _, _, voter, voter2) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+    // voter2 votes No with 5M — quorum met but yes does not exceed no
+    gov.cast_vote(&voter2, &id, &Vote::No);
+    let proposal = gov.get_proposal(&id);
+    env.ledger().with_mut(|l| l.timestamp = proposal.end_time + 1);
+
+    gov.finalise(&id);
+    let after_first = gov.get_proposal(&id);
+    assert_eq!(after_first.state, ProposalState::Rejected);
+
+    let result = gov.try_finalise(&id);
+    assert_eq!(result, Err(Ok(ContractError::ProposalNotActive)));
+
+    let after_second = gov.get_proposal(&id);
+    assert_eq!(after_second.state, ProposalState::Rejected);
+    assert_eq!(after_second.votes_yes, after_first.votes_yes);
+    assert_eq!(after_second.votes_no, after_first.votes_no);
+    assert_eq!(after_second.votes_abstain, after_first.votes_abstain);
+    assert_eq!(after_second.voter_count, after_first.voter_count);
+}
+
+/// Issue #444: finalise() on an Executed proposal returns ProposalNotActive and does not mutate state.
+#[test]
+fn test_finalise_twice_on_executed_proposal_no_mutation() {
+    let env = Env::default();
+    let (gov, _, admin, voter, _) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    let proposal = gov.get_proposal(&id);
+    env.ledger().with_mut(|l| l.timestamp = proposal.end_time + 1);
+
+    gov.finalise(&id);
+    gov.execute(&admin, &id);
+    let after_execute = gov.get_proposal(&id);
+    assert_eq!(after_execute.state, ProposalState::Executed);
+
+    let result = gov.try_finalise(&id);
+    assert_eq!(result, Err(Ok(ContractError::ProposalNotActive)));
+
+    let after_second = gov.get_proposal(&id);
+    assert_eq!(after_second.state, ProposalState::Executed);
+    assert_eq!(after_second.votes_yes, after_execute.votes_yes);
+    assert_eq!(after_second.votes_no, after_execute.votes_no);
+    assert_eq!(after_second.votes_abstain, after_execute.votes_abstain);
+    assert_eq!(after_second.voter_count, after_execute.voter_count);
+}
+
+/// Issue #444: finalise() on a Cancelled proposal returns ProposalNotActive and does not mutate state.
+#[test]
+fn test_finalise_twice_on_cancelled_proposal_no_mutation() {
+    let env = Env::default();
+    let (gov, _, admin, voter, _) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    gov.cancel(&admin, &id, &None);
+    let after_cancel = gov.get_proposal(&id);
+    assert_eq!(after_cancel.state, ProposalState::Cancelled);
+
+    let result = gov.try_finalise(&id);
+    assert_eq!(result, Err(Ok(ContractError::ProposalNotActive)));
+
+    let after_second = gov.get_proposal(&id);
+    assert_eq!(after_second.state, ProposalState::Cancelled);
+    assert_eq!(after_second.votes_yes, after_cancel.votes_yes);
+    assert_eq!(after_second.votes_no, after_cancel.votes_no);
+    assert_eq!(after_second.votes_abstain, after_cancel.votes_abstain);
+    assert_eq!(after_second.voter_count, after_cancel.voter_count);
+}
+
 // ---------------------------------------------------------------------------
 // Issue #1: Update Voting Token
 // ---------------------------------------------------------------------------

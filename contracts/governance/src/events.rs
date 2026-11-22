@@ -4,6 +4,20 @@ use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 
 use crate::types::{ProposalState, Vote};
 
+/// Emitted when the contract is paused by the admin.
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractPaused {
+    pub admin: Address,
+}
+
+/// Emitted when the contract is unpaused by the admin.
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUnpaused {
+    pub admin: Address,
+}
+
 pub struct GovernanceEvents;
 
 impl GovernanceEvents {
@@ -168,14 +182,18 @@ impl GovernanceEvents {
     pub fn paused(env: &Env, admin: &Address) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("paused")),
-            admin.clone(),
+            ContractPaused {
+                admin: admin.clone(),
+            },
         );
     }
 
     pub fn unpaused(env: &Env, admin: &Address) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("unpause")),
-            admin.clone(),
+            ContractUnpaused {
+                admin: admin.clone(),
+            },
         );
     }
 
