@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -45,6 +45,40 @@ describe('FaucetClaimStore', () => {
     store.reserve('GTESTWALLET', now);
     store.release('GTESTWALLET', now);
     expect(store.reserve('GTESTWALLET', now + 1)).toBeNull();
+    store.close();
+  });
+
+  it('checkpoints the WAL with TRUNCATE on shutdown', () => {
+    const path = join(directory, 'claims.sqlite');
+    const store = new FaucetClaimStore(path);
+    store.reserve('GTESTWALLET', 1_800_000_000_000);
+
+    const execSpy = jest.spyOn(store, 'exec');
+    store.checkpoint();
+
+    expect(execSpy).toHaveBeenCalledWith('PRAGMA wal_checkpoint(TRUNCATE)');
+    expect(existsSync(`${path}-wal`)).toBe(false);
+    execSpy.mockRestore();
+    store.close();
+  });
+
+  it('checkpoints when the WAL exceeds 1000 pages', () => {
+    const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
+    store.reserve('GTESTWALLET', 1_800_000_000_000);
+
+    const pageCountSpy = jest.spyOn(store, 'walPageCount').mockReturnValue(1_001);
+    const execSpy = jest.spyOn(store, 'exec');
+
+    store.maybeCheckpoint();
+    expect(execSpy).toHaveBeenCalledWith('PRAGMA wal_checkpoint(TRUNCATE)');
+
+    execSpy.mockClear();
+    pageCountSpy.mockReturnValue(1_000);
+    store.maybeCheckpoint();
+    expect(execSpy).not.toHaveBeenCalled();
+
+    pageCountSpy.mockRestore();
+    execSpy.mockRestore();
     store.close();
   });
 });

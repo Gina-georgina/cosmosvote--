@@ -3,6 +3,7 @@ import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
+import { checkpointFaucetWal } from './faucet';
 import helmet from 'helmet';
 
 // Validate env vars before anything else — fails fast with a clear message.
@@ -46,6 +47,13 @@ async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
   healthServer.close();
+  // Truncate the faucet WAL so it does not grow unboundedly across restarts.
+  // A checkpoint failure must never block shutdown.
+  try {
+    await checkpointFaucetWal();
+  } catch (err) {
+    logger.error({ event: 'faucet_wal_checkpoint_failed', err }, 'faucet WAL checkpoint failed during shutdown');
+  }
   await auditLogger.flush();
   await flushErrorTracking();
   process.exit(0);

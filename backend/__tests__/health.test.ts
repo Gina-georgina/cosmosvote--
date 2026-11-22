@@ -34,7 +34,7 @@ describe('health endpoints', () => {
   });
 
   it('returns liveness status and uptime', async () => {
-    server = createHealthServer(async () => true, () => 12.5);
+    server = createHealthServer(async () => true, () => 12.5, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const result = await request(server, '/health');
@@ -45,7 +45,7 @@ describe('health endpoints', () => {
 
   it('returns 200 when ready and 503 when the dependency is not ready', async () => {
     let ready = true;
-    server = createHealthServer(async () => ready);
+    server = createHealthServer(async () => ready, undefined, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     expect((await request(server, '/ready')).statusCode).toBe(200);
@@ -54,7 +54,7 @@ describe('health endpoints', () => {
   });
 
   it('sets security headers on health responses', async () => {
-    server = createHealthServer(async () => true, () => 1);
+    server = createHealthServer(async () => true, () => 1, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const { headers } = await request(server, '/health');
@@ -67,7 +67,7 @@ describe('health endpoints', () => {
 
   it('sets security headers on readiness responses, including 503', async () => {
     let ready = true;
-    server = createHealthServer(async () => ready);
+    server = createHealthServer(async () => ready, undefined, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const okResponse = await request(server, '/ready');
@@ -84,5 +84,85 @@ describe('health endpoints', () => {
     expect(notReadyResponse.headers['x-frame-options']).toBe('DENY');
     expect(notReadyResponse.headers['x-content-type-options']).toBe('nosniff');
     expect(notReadyResponse.headers['referrer-policy']).toBe('strict-origin');
+  });
+
+  it('/health/live returns 200 even when the database check fails', async () => {
+    server = createHealthServer(
+      async () => true,
+      () => 3,
+      async () => { throw new Error('db down'); },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const result = await request(server, '/health/live');
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ status: 'ok', uptime: 3 });
+  });
+
+  it('/health/ready returns 200 when the database check succeeds', async () => {
+    server = createHealthServer(async () => true, undefined, async () => true);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const result = await request(server, '/health/ready');
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ status: 'ok' });
+  });
+
+  it('/health/ready returns 503 when the database check fails', async () => {
+    server = createHealthServer(async () => true, undefined, async () => false);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const result = await request(server, '/health/ready');
+
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body)).toEqual({ status: 'unavailable' });
+  });
+
+  it('/health/ready returns 503 when the database check throws', async () => {
+    server = createHealthServer(
+      async () => true,
+      undefined,
+      async () => { throw new Error('connection refused'); },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const result = await request(server, '/health/ready');
+
+    expect(result.statusCode).toBe(503);
+    expect(JSON.parse(result.body)).toEqual({ status: 'unavailable' });
+  });
+
+  it('sets security headers on /health/live and /health/ready responses, including 503', async () => {
+    let dbUp = true;
+    server = createHealthServer(
+      async () => true,
+      () => 1,
+      async () => dbUp,
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const liveResponse = await request(server, '/health/live');
+    expect(liveResponse.statusCode).toBe(200);
+    expect(liveResponse.headers['strict-transport-security']).toBe('max-age=31536000');
+    expect(liveResponse.headers['x-frame-options']).toBe('DENY');
+    expect(liveResponse.headers['x-content-type-options']).toBe('nosniff');
+    expect(liveResponse.headers['referrer-policy']).toBe('strict-origin');
+
+    const readyOk = await request(server, '/health/ready');
+    expect(readyOk.statusCode).toBe(200);
+    expect(readyOk.headers['strict-transport-security']).toBe('max-age=31536000');
+    expect(readyOk.headers['x-frame-options']).toBe('DENY');
+    expect(readyOk.headers['x-content-type-options']).toBe('nosniff');
+    expect(readyOk.headers['referrer-policy']).toBe('strict-origin');
+
+    dbUp = false;
+    const readyDown = await request(server, '/health/ready');
+    expect(readyDown.statusCode).toBe(503);
+    expect(readyDown.headers['strict-transport-security']).toBe('max-age=31536000');
+    expect(readyDown.headers['x-frame-options']).toBe('DENY');
+    expect(readyDown.headers['x-content-type-options']).toBe('nosniff');
+    expect(readyDown.headers['referrer-policy']).toBe('strict-origin');
   });
 });

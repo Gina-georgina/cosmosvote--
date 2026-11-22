@@ -23,6 +23,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { formatTokenAmount, maskAddress, sanitizeWalletMessage } from '../utils';
 import { explorerAccountUrl } from '../config';
 import { usePolling } from '../hooks/usePolling';
+import { useProposalStore } from '../stores/proposalStore';
 
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
@@ -84,12 +85,31 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
   const isProposalActive = p.state === 'Active';
 
+  // Optimistic vote state from the proposal store (issue #400)
+  const applyOptimisticVote = useProposalStore(s => s.applyOptimisticVote);
+  const reconcileOptimisticVote = useProposalStore(s => s.reconcileOptimisticVote);
+
   // Fetch latest tally from chain
   const fetchTally = useCallback(async () => {
     const fresh = await fetchProposal(Number(p.id));
-    setTally({ yes: fresh.votes_yes, no: fresh.votes_no, abstain: fresh.votes_abstain });
+    // Reconcile any optimistic vote against the server tally. If the server
+    // value conflicts with the optimistic value, roll back to server values.
+    const reconciled = reconcileOptimisticVote(Number(p.id), {
+      yes: fresh.votes_yes,
+      no: fresh.votes_no,
+      abstain: fresh.votes_abstain,
+    });
+    setTally({
+      yes: reconciled.tally.yes,
+      no: reconciled.tally.no,
+      abstain: reconciled.tally.abstain,
+    });
+    if (reconciled.rolledBack) {
+      setHasVoted(false);
+      setVoteRecord(null);
+    }
     setLastUpdated(new Date());
-  }, [p.id]);
+  }, [p.id, reconcileOptimisticVote]);
 
   // Poll every TALLY_POLL_INTERVAL ms while Active
   usePolling(fetchTally, { interval: TALLY_POLL_INTERVAL, enabled: isProposalActive });
@@ -233,12 +253,28 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
     setVoteConfirmation(null);
     try {
       await castVote(walletAddress, Number(p.id), voteInput, signTransaction);
-      setHasVoted(true);
       const voteLabel =
         typeof voteInput === 'object' && 'choice' in voteInput
           ? (safeChoices[voteInput.choice] ?? `Choice ${voteInput.choice}`)
           : voteInput;
-      setVoteRecord({ vote: voteLabel, weight: BigInt(0) });
+      // Voting weight used for the optimistic tally increment
+      const weight = ownBalance !== null && delegatedWeight !== null
+        ? ownBalance + delegatedWeight
+        : BigInt(0);
+      // Apply optimistic update immediately so the UI reflects the vote
+      // without waiting for the next polling cycle (issue #400).
+      const optimistic = applyOptimisticVote(Number(p.id), voteLabel, weight, {
+        yes: tally.yes,
+        no: tally.no,
+        abstain: tally.abstain,
+      });
+      setTally({
+        yes: optimistic.tally.yes,
+        no: optimistic.tally.no,
+        abstain: optimistic.tally.abstain,
+      });
+      setHasVoted(true);
+      setVoteRecord({ vote: voteLabel, weight });
       setVoteConfirmation(
         sanitizeWalletMessage(
           `Your vote "${voteLabel}" on proposal #${String(p.id)} has been submitted.`,

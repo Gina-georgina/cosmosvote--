@@ -1,9 +1,26 @@
 /**
  * Notification service — polls Horizon/Soroban RPC for contract events
  * and delivers them to configured webhooks.
+ *
+ * Outgoing webhook payloads are signed with HMAC-SHA256 when a shared
+ * secret is configured (via `WEBHOOK_SECRET`). The signature is sent in
+ * the `X-CosmosVote-Signature` header as `sha256=<hex>`.
+ *
+ * Verification example (Node.js):
+ *
+ *   import crypto from 'crypto';
+ *
+ *   const expected = 'sha256=' + crypto
+ *     .createHmac('sha256', process.env.WEBHOOK_SECRET!)
+ *     .update(rawRequestBody) // the exact bytes received, before JSON.parse
+ *     .digest('hex');
+ *
+ *   const received = req.headers['x-cosmosvote-signature'];
+ *   const valid = received === expected; // use timingSafeEqual in production
  */
 
 import axios from 'axios';
+import { createHmac } from 'crypto';
 import { captureError } from './errorTracking';
 import { logger } from './logger';
 import { validateWebhookUrl } from './webhookUrlValidator';
@@ -18,6 +35,9 @@ const MAX_POLL_FAILURES = 3;
 const MAX_WEBHOOK_RETRIES = 3;
 const INITIAL_WEBHOOK_RETRY_DELAY_MS = 1_000;
 
+const SIGNATURE_HEADER = 'X-CosmosVote-Signature';
+const SIGNATURE_PREFIX = 'sha256=';
+
 function getHttpStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const status = (error as { response?: { status?: unknown } }).response?.status;
@@ -26,6 +46,11 @@ function getHttpStatus(error: unknown): number | undefined {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function computeSignature(rawBody: string, secret: string): string {
+  const hex = createHmac('sha256', secret).update(rawBody).digest('hex');
+  return `${SIGNATURE_PREFIX}${hex}`;
 }
 
 export interface WebhookPayload {
@@ -40,15 +65,28 @@ export interface NotificationServiceConfig {
   contractId: string;
   webhookUrl: string;
   pollIntervalMs?: number;
+  webhookSecret?: string;
 }
 
 export class NotificationService {
   private consecutiveFailures = 0;
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly webhookSecret?: string;
 
   constructor(private readonly config: NotificationServiceConfig) {
     activeSubscriptions.inc();
+    this.webhookSecret = config.webhookSecret ?? process.env.WEBHOOK_SECRET;
+    if (!this.webhookSecret) {
+      logger.warn(
+        {
+          event: 'webhook_secret_missing',
+          context: 'webhook-registration',
+          webhookUrl: this.config.webhookUrl,
+        },
+        'WEBHOOK_SECRET not configured — outgoing webhooks will be sent unsigned'
+      );
+    }
     const validation = validateWebhookUrl(this.config.webhookUrl);
     if (!validation.ok) {
       logger.error(
@@ -120,6 +158,16 @@ export class NotificationService {
   }
 
   async deliverWebhook(payload: WebhookPayload): Promise<void> {
+    // Serialize once so the signature is computed over the exact bytes sent.
+    const rawBody = JSON.stringify(payload);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.webhookSecret) {
+      headers[SIGNATURE_HEADER] = computeSignature(rawBody, this.webhookSecret);
+    }
+
     for (let attempt = 0; attempt <= MAX_WEBHOOK_RETRIES; attempt += 1) {
       const validation = validateWebhookUrl(this.config.webhookUrl);
       if (!validation.ok) {
@@ -139,9 +187,10 @@ export class NotificationService {
 
       const end = webhookLatencySeconds.startTimer({ contract_id: this.config.contractId });
       try {
-        const response = await axios.post(this.config.webhookUrl, payload, {
+        const response = await axios.post(this.config.webhookUrl, rawBody, {
           timeout: 5_000,
           maxRedirects: 0,
+          headers,
         });
         end({ status_code: String(response.status) });
         notificationSentTotal.inc({ contract_id: this.config.contractId });

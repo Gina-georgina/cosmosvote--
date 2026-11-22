@@ -3,7 +3,8 @@ import { metricsHandler } from './metrics';
 
 export function createHealthServer(
   checkReadiness: () => Promise<boolean>,
-  getUptime: () => number = () => process.uptime()
+  getUptime: () => number = () => process.uptime(),
+  checkDatabase: () => Promise<boolean> = async () => true
 ): Server {
   const limiter = new RateLimiter();
   // Clean up stale entries every 5 minutes
@@ -15,16 +16,45 @@ export function createHealthServer(
 
     response.setHeader('Content-Type', 'application/json');
 
+    // Liveness: lightweight ping, always 200 if the process is up.
+    if (request.method === 'GET' && request.url === '/health/live') {
+      response.writeHead(200);
+      response.end(JSON.stringify({ status: 'ok', uptime: getUptime() }));
+      return;
+    }
+
+    // Readiness: checks dependencies including database connectivity.
+    if (request.method === 'GET' && request.url === '/health/ready') {
+      const dbOk = await checkDatabase().catch(() => false);
+      const ready = dbOk && (await checkReadiness().catch(() => false));
+      response.writeHead(ready ? 200 : 503);
+      response.end(
+        JSON.stringify({
+          status: ready ? 'ready' : 'not_ready',
+          checks: { database: dbOk ? 'ok' : 'fail' },
+        })
+      );
+      return;
+    }
+
+    // Backwards-compatible liveness endpoint.
     if (request.method === 'GET' && request.url === '/health') {
       response.writeHead(200);
       response.end(JSON.stringify({ status: 'ok', uptime: getUptime() }));
       return;
     }
 
+    // Backwards-compatible readiness endpoint; now also fails when DB is down.
     if (request.method === 'GET' && request.url === '/ready') {
-      const ready = await checkReadiness().catch(() => false);
+      const dbOk = await checkDatabase().catch(() => false);
+      const ready = dbOk && (await checkReadiness().catch(() => false));
       response.writeHead(ready ? 200 : 503);
-      response.end(JSON.stringify({ status: ready ? 'ready' : 'not_ready' }));
+      response.end(
+        JSON.stringify({
+          status: ready ? 'ready' : 'not_ready',
+          checks: { database: dbOk ? 'ok' : 'fail' },
+        })
+      );
       return;
     }
 

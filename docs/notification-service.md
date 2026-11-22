@@ -48,7 +48,7 @@ Key variables:
 | `SMTP_PASS` | SMTP password |
 | `EMAIL_FROM` | Sender address for email notifications |
 | `SUBSCRIPTIONS_FILE` | Path to persisted subscriptions JSON (default: `./data/subscriptions.json`) |
-| `WEBHOOK_SIGNING_SECRET` | Shared secret used to HMAC-SHA256 sign webhook deliveries |
+| `WEBHOOK_SECRET` | Shared secret used to HMAC-SHA256 sign webhook deliveries |
 
 ---
 
@@ -143,6 +143,61 @@ Webhooks receive an HTTP POST with JSON body:
   }
 }
 ```
+
+### Verifying webhook signatures
+
+Every webhook delivery includes an `X-CosmosVote-Signature` header. The value is the
+hex-encoded HMAC-SHA256 of the **raw JSON request body** (the exact bytes sent on the
+wire, before any parsing or re-serialization), computed with the shared secret configured
+via the `WEBHOOK_SECRET` environment variable.
+
+Consumers should:
+
+1. Read the raw request body as a `Buffer` (do not parse and re-stringify the JSON first —
+   key ordering and whitespace changes will invalidate the signature).
+2. Compute the HMAC-SHA256 of those raw bytes using the shared secret.
+3. Compare the computed digest with the header value using a constant-time comparison.
+
+Node.js (Express) example:
+
+```js
+const crypto = require('crypto');
+const express = require('express');
+
+const app = express();
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
+// Capture the raw body so the signature can be verified over the exact bytes sent.
+app.post(
+  '/hooks/governance',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const received = req.get('X-CosmosVote-Signature') || '';
+    const expected = crypto
+      .createHmac('sha256', WEBHOOK_SECRET)
+      .update(req.body) // req.body is a Buffer of the raw JSON
+      .digest('hex');
+
+    const receivedBuf = Buffer.from(received, 'hex');
+    const expectedBuf = Buffer.from(expected, 'hex');
+
+    const valid =
+      receivedBuf.length === expectedBuf.length &&
+      crypto.timingSafeEqual(receivedBuf, expectedBuf);
+
+    if (!valid) {
+      return res.status(401).send('Invalid signature');
+    }
+
+    const payload = JSON.parse(req.body.toString('utf8'));
+    // ... handle payload.event ...
+    res.status(200).send('ok');
+  }
+);
+```
+
+If the signature does not match, reject the request (e.g. respond with `401`) and do not
+process the payload.
 
 ---
 

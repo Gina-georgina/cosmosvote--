@@ -16,20 +16,56 @@ import Database from 'better-sqlite3';
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
+const WAL_CHECKPOINT_PAGE_THRESHOLD = 1000;
 
 export class FaucetClaimStore {
   private readonly db: Database.Database;
+  private readonly isWalMode: boolean;
 
   constructor(databasePath: string) {
     if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
     this.db = new Database(databasePath);
     this.db.pragma('journal_mode = WAL');
+    this.isWalMode = String(this.db.pragma('journal_mode', { simple: true })).toLowerCase() === 'wal';
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS faucet_claims (
         wallet_address TEXT PRIMARY KEY,
         claimed_at_ms INTEGER NOT NULL
       )
     `);
+  }
+
+  /**
+   * Runs `PRAGMA wal_checkpoint(TRUNCATE)`, flushing the WAL back into the main
+   * database file and truncating it to zero bytes. No-op outside WAL mode.
+   */
+  checkpoint(): void {
+    if (!this.isWalMode) return;
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
+  }
+
+  /**
+   * Returns the number of pages currently held in the WAL file, or 0 when the
+   * database is not in WAL mode.
+   */
+  walPageCount(): number {
+    if (!this.isWalMode) return 0;
+    const result = this.db.pragma('wal_checkpoint(PASSIVE)', { simple: true }) as
+      | { busy: number; log: number; checkpointed: number }
+      | number
+      | undefined;
+    if (typeof result === 'number') return result;
+    if (result && typeof result === 'object') return Number(result.log ?? 0);
+    return 0;
+  }
+
+  /**
+   * Truncates the WAL when it has grown past the page threshold. Safe to call
+   * after every write; cheap when the WAL is small.
+   */
+  maybeCheckpoint(): void {
+    if (!this.isWalMode) return;
+    if (this.walPageCount() > WAL_CHECKPOINT_PAGE_THRESHOLD) this.checkpoint();
   }
 
   reserve(address: string, now = Date.now()): number | null {
@@ -42,7 +78,9 @@ export class FaucetClaimStore {
       return result.changes === 1;
     });
 
-    if (reserve()) return null;
+    const reserved = reserve();
+    this.maybeCheckpoint();
+    if (reserved) return null;
     const claim = this.db.prepare(
       'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
     ).get(address) as { claimed_at_ms: number } | undefined;
@@ -53,10 +91,14 @@ export class FaucetClaimStore {
     this.db.prepare(
       'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
     ).run(address, claimedAt);
+    this.maybeCheckpoint();
   }
 
   close(): void {
-    this.db.close();
+    if (this.db.open) {
+      this.checkpoint();
+      this.db.close();
+    }
   }
 }
 
