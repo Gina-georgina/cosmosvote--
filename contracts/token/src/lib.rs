@@ -11,6 +11,7 @@ mod types;
 
 #[cfg(test)]
 mod test;
+mod prop_tests;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
