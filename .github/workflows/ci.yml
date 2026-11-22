@@ -222,6 +222,44 @@ jobs:
       - name: Run actionlint
         run: actionlint -color
 
+  backend-dependency-integrity:
+    name: Backend Lockfile Integrity
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - name: Verify package-lock.json matches package.json
+        # npm ci fails if package.json and package-lock.json are out of sync,
+        # which also catches unpinned/floating version ranges drifting apart
+        # from the committed lockfile.
+        run: npm ci
+      - name: Check for unpinned dependency versions
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            const ranges = ['^', '~', '>', '<', '*', 'x'];
+            const offenders = [];
+            for (const group of ['dependencies', 'devDependencies']) {
+              for (const [name, version] of Object.entries(pkg[group] || {})) {
+                if (ranges.some((r) => version.includes(r))) {
+                  offenders.push(\`\${group}.\${name}: \${version}\`);
+                }
+              }
+            }
+            if (offenders.length > 0) {
+              console.error('Found unpinned dependency versions:\n' + offenders.join('\n'));
+              process.exit(1);
+            }
+            console.log('All backend dependencies are pinned to exact versions.');
+          "
+
   frontend-coverage:
     name: Frontend Coverage
     runs-on: ubuntu-latest
