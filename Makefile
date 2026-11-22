@@ -1,4 +1,4 @@
-.PHONY: all build test fmt fmt-check lint clean doc check
+.PHONY: all build test fmt fmt-check lint clean doc check load-test
 
 # Default target
 all: build
@@ -85,6 +85,21 @@ wasm-size: build
 ## Run mutation tests against governance contract (requires cargo-mutants)
 mutants:
 	cargo mutants -p cosmosvote-governance --features testutils
+
+## Run k6 load tests against a testnet RPC endpoint (requires k6).
+## Override the target with: make load-test LOAD_TEST_RPC_URL=https://rpc.example.com
+LOAD_TEST_RPC_URL ?= https://rpc.testnet.cosmosvote.example
+LOAD_TEST_SCRIPT ?= loadtest/k6/cosmosvote_load_test.js
+LOAD_TEST_RESULTS_DIR ?= loadtest/results
+
+load-test:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 is required: https://k6.io/docs/get-started/installation/"; exit 1; }
+	@mkdir -p $(LOAD_TEST_RESULTS_DIR)
+	k6 run \
+		-e RPC_URL=$(LOAD_TEST_RPC_URL) \
+		--summary-export $(LOAD_TEST_RESULTS_DIR)/summary.json \
+		--out json=$(LOAD_TEST_RESULTS_DIR)/results.json \
+		$(LOAD_TEST_SCRIPT)
 
 ## Run all checks (CI equivalent)
 ci: fmt-check lint test build

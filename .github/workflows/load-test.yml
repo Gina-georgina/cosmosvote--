@@ -1,0 +1,209 @@
+name: Load Test (Testnet)
+
+on:
+  schedule:
+    # Run every day at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Testnet base URL (overrides repository variable TESTNET_BASE_URL)'
+        required: false
+        type: string
+      scenario:
+        description: 'Which load scenario to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - proposal_fetch
+          - vote_submit
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # SLO thresholds (issue #491)
+  SLO_P95_MS: '2000'
+  SLO_ERROR_RATE: '0.01'
+  # Regression tolerance vs baseline (percentage, e.g. 20 = allow 20% worse)
+  REGRESSION_TOLERANCE_PCT: '20'
+  BASELINE_FILE: tests/baselines/load_test.json
+
+jobs:
+  load-test:
+    name: k6 load test against testnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve testnet base URL
+        id: target
+        env:
+          INPUT_BASE_URL: ${{ github.event.inputs.base_url }}
+          VAR_BASE_URL: ${{ vars.TESTNET_BASE_URL }}
+          SECRET_BASE_URL: ${{ secrets.TESTNET_BASE_URL }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${INPUT_BASE_URL:-${VAR_BASE_URL:-${SECRET_BASE_URL:-}}}"
+          if [ -z "${BASE_URL}" ]; then
+            echo "::error::No testnet base URL configured. Set repository variable TESTNET_BASE_URL, secret TESTNET_BASE_URL, or pass the base_url workflow input."
+            exit 1
+          fi
+          # Strip trailing slash for consistent URL joining
+          BASE_URL="${BASE_URL%/}"
+          echo "base_url=${BASE_URL}" >> "$GITHUB_OUTPUT"
+          echo "Resolved testnet base URL: ${BASE_URL}"
+
+      - name: Install k6
+        run: |
+          set -euo pipefail
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+          k6 version
+
+      - name: Prepare results directory
+        run: mkdir -p load-test-results
+
+      - name: Run proposal fetch load test
+        if: ${{ github.event.inputs.scenario == '' || github.event.inputs.scenario == 'all' || github.event.inputs.scenario == 'proposal_fetch' }}
+        env:
+          BASE_URL: ${{ steps.target.outputs.base_url }}
+          TESTNET_API_TOKEN: ${{ secrets.TESTNET_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          k6 run \
+            --summary-export load-test-results/proposal_fetch-summary.json \
+            --out json=load-test-results/proposal_fetch-raw.json \
+            -e BASE_URL="${BASE_URL}" \
+            -e API_TOKEN="${TESTNET_API_TOKEN:-}" \
+            -e SLO_P95_MS="${SLO_P95_MS}" \
+            -e SLO_ERROR_RATE="${SLO_ERROR_RATE}" \
+            tests/load/proposal_fetch.js
+
+      - name: Run vote submit load test
+        if: ${{ github.event.inputs.scenario == '' || github.event.inputs.scenario == 'all' || github.event.inputs.scenario == 'vote_submit' }}
+        env:
+          BASE_URL: ${{ steps.target.outputs.base_url }}
+          TESTNET_API_TOKEN: ${{ secrets.TESTNET_API_TOKEN }}
+          TESTNET_VOTER_KEY: ${{ secrets.TESTNET_VOTER_KEY }}
+        run: |
+          set -euo pipefail
+          k6 run \
+            --summary-export load-test-results/vote_submit-summary.json \
+            --out json=load-test-results/vote_submit-raw.json \
+            -e BASE_URL="${BASE_URL}" \
+            -e API_TOKEN="${TESTNET_API_TOKEN:-}" \
+            -e VOTER_KEY="${TESTNET_VOTER_KEY:-}" \
+            -e SLO_P95_MS="${SLO_P95_MS}" \
+            -e SLO_ERROR_RATE="${SLO_ERROR_RATE}" \
+            tests/load/vote_submit.js
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Load Test Report</title>"
+            echo "<style>body{font-family:sans-serif;margin:2rem;}table{border-collapse:collapse;}td,th{border:1px solid #ccc;padding:4px 8px;}th{background:#f0f0f0;}</style>"
+            echo "</head><body><h1>Load Test Report</h1>"
+            echo "<p>Run: <code>${GITHUB_RUN_ID}</code> &mdash; Target: <code>${{ steps.target.outputs.base_url }}</code></p>"
+            echo "<p>SLO: p95 &lt; ${SLO_P95_MS} ms, error rate &lt; ${SLO_ERROR_RATE}</p>"
+            for f in load-test-results/*-summary.json; do
+              [ -e "$f" ] || continue
+              echo "<h2>$(basename "$f" -summary.json)</h2>"
+              echo "<table><tr><th>Metric</th><th>Value</th></tr>"
+              jq -r '.metrics | to_entries[] | "<tr><td>\(.key)</td><td>\(.value.values // .value | tostring)</td></tr>"' "$f" 2>/dev/null || echo "<tr><td colspan=2>Unable to parse summary</td></tr>"
+              echo "</table>"
+            done
+            echo "</body></html>"
+          } > load-test-results/report.html
+
+      - name: Compare against baseline
+        if: always()
+        id: compare
+        env:
+          BASELINE_FILE: ${{ env.BASELINE_FILE }}
+          REGRESSION_TOLERANCE_PCT: ${{ env.REGRESSION_TOLERANCE_PCT }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "${BASELINE_FILE}" ]; then
+            echo "::warning::No baseline file found at ${BASELINE_FILE}; skipping regression comparison."
+            echo "regression=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REGRESSION=0
+          REPORT="load-test-results/regression-report.txt"
+          : > "$REPORT"
+
+          for scenario in proposal_fetch vote_submit; do
+            SUMMARY="load-test-results/${scenario}-summary.json"
+            [ -f "$SUMMARY" ] || continue
+
+            # Extract current p95 and error rate from k6 summary export
+            CUR_P95=$(jq -r '.metrics.http_req_duration.values["p(95)"] // empty' "$SUMMARY")
+            CUR_ERR=$(jq -r '.metrics.http_req_failed.values.rate // empty' "$SUMMARY")
+
+            BASE_P95=$(jq -r --arg s "$scenario" '.[$s].p95_ms // empty' "$BASELINE_FILE")
+            BASE_ERR=$(jq -r --arg s "$scenario" '.[$s].error_rate // empty' "$BASELINE_FILE")
+
+            echo "== ${scenario} ==" >> "$REPORT"
+            echo "  p95:        current=${CUR_P95:-n/a} ms  baseline=${BASE_P95:-n/a} ms" >> "$REPORT"
+            echo "  error rate: current=${CUR_ERR:-n/a}     baseline=${BASE_ERR:-n/a}" >> "$REPORT"
+
+            if [ -n "$CUR_P95" ] && [ -n "$BASE_P95" ] && [ "$BASE_P95" != "null" ]; then
+              THRESHOLD=$(awk -v b="$BASE_P95" -v t="$REGRESSION_TOLERANCE_PCT" 'BEGIN { printf "%.2f", b * (1 + t/100) }')
+              IS_REGRESSION=$(awk -v c="$CUR_P95" -v th="$THRESHOLD" 'BEGIN { print (c > th) ? "1" : "0" }')
+              if [ "$IS_REGRESSION" = "1" ]; then
+                echo "::warning::${scenario} p95 regression: ${CUR_P95} ms exceeds baseline ${BASE_P95} ms + ${REGRESSION_TOLERANCE_PCT}% (threshold ${THRESHOLD} ms)"
+                echo "  -> REGRESSION (p95 ${CUR_P95} ms > ${THRESHOLD} ms)" >> "$REPORT"
+                REGRESSION=1
+              fi
+            fi
+
+            if [ -n "$CUR_ERR" ] && [ -n "$BASE_ERR" ] && [ "$BASE_ERR" != "null" ]; then
+              THRESHOLD=$(awk -v b="$BASE_ERR" -v t="$REGRESSION_TOLERANCE_PCT" 'BEGIN { printf "%.6f", b * (1 + t/100) }')
+              IS_REGRESSION=$(awk -v c="$CUR_ERR" -v th="$THRESHOLD" 'BEGIN { print (c > th) ? "1" : "0" }')
+              if [ "$IS_REGRESSION" = "1" ]; then
+                echo "::warning::${scenario} error-rate regression: ${CUR_ERR} exceeds baseline ${BASE_ERR} + ${REGRESSION_TOLERANCE_PCT}% (threshold ${THRESHOLD})"
+                echo "  -> REGRESSION (error rate ${CUR_ERR} > ${THRESHOLD})" >> "$REPORT"
+                REGRESSION=1
+              fi
+            fi
+            echo "" >> "$REPORT"
+          done
+
+          cat "$REPORT"
+          echo "regression=${REGRESSION}" >> "$GITHUB_OUTPUT"
+
+          if [ "$REGRESSION" = "1" ]; then
+            echo "::warning::Performance regression detected versus baseline. See regression-report.txt artefact."
+          fi
+
+      - name: Upload load test artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ github.run_id }}
+          path: |
+            load-test-results/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Fail on regression
+        if: always() && steps.compare.outputs.regression == '1'
+        run: |
+          echo "::error::Load test regression detected versus baseline (${BASELINE_FILE}). Failing workflow."
+          exit 1
