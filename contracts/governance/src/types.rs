@@ -105,6 +105,7 @@ pub enum ProposalState {
     Rejected,
     Executed,
     Cancelled,
+    ExecutionFailed,
 }
 
 #[contracttype]
