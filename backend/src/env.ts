@@ -27,7 +27,30 @@ const envSchema = z.object({
 
   GOVERNANCE_CONTRACT_ID: z.string().min(1, 'GOVERNANCE_CONTRACT_ID is required'),
 
-  WEBHOOK_URL: z.string().url('WEBHOOK_URL must be a valid URL'),
+  // Optional: empty/omitted disables webhook delivery. When set it must be a
+  // valid HTTPS URL.
+  WEBHOOK_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim()))
+    .refine(
+      (v) => {
+        if (v === undefined) return true;
+        try {
+          return new URL(v).protocol === 'https:';
+        } catch {
+          return false;
+        }
+      },
+      'WEBHOOK_URL must be a valid HTTPS URL (or empty to disable webhooks)',
+    ),
+
+  // Optional bearer token protecting /admin/* endpoints. When unset, admin
+  // endpoints reject all requests.
+  ADMIN_TOKEN: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim())),
 
   POLL_INTERVAL_MS: z
     .string()

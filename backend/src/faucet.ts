@@ -1,7 +1,9 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
+import { IpRateLimiter, getClientIp } from './rateLimiter';
 import {
   Contract,
   Keypair,
@@ -14,8 +16,14 @@ import {
 import Database from 'better-sqlite3';
 
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_IP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
+
+/** Hash an IP address so it is never stored in plaintext. */
+export function hashIp(ip: string): string {
+  return createHash('sha256').update(ip).digest('hex');
+}
 
 export class FaucetClaimStore {
   private readonly db: Database.Database;
@@ -68,6 +76,8 @@ export interface FaucetConfig {
   rpcUrl: string;
   amount: bigint;
   tokenDecimals: number;
+  /** Per-IP claim cooldown window in milliseconds (default: 24 h). */
+  ipCooldownMs?: number;
 }
 
 export class FaucetMintError extends Error {
@@ -152,6 +162,7 @@ export function createFaucetServer(
   config: FaucetConfig,
   store = new FaucetClaimStore(config.databasePath),
   mint: (config: FaucetConfig, recipient: string) => Promise<string> = mintTestTokens,
+  ipLimiter = new IpRateLimiter(config.ipCooldownMs ?? DEFAULT_IP_COOLDOWN_MS),
 ): Server {
   // Seed the runtime allowlist with the faucet's own origin so the single-origin
   // FAUCET_ALLOWED_ORIGIN path still works alongside the ALLOWED_ORIGINS list.
@@ -203,12 +214,22 @@ export function createFaucetServer(
     }
 
     const now = Date.now();
+    const clientIp = getClientIp(request);
+    const ipRetryAt = ipLimiter.check(hashIp(clientIp), now);
+    if (ipRetryAt !== null) {
+      response.setHeader('Retry-After', Math.max(1, Math.ceil((ipRetryAt - now) / 1000)));
+      sendJson(response, 429, { error: 'This IP address has already claimed test tokens recently.', retryAt: ipRetryAt });
+      return;
+    }
+
     const retryAt = store.reserve(address, now);
     if (retryAt !== null) {
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
       sendJson(response, 429, { error: 'This wallet has already claimed test tokens in the last 24 hours.', retryAt });
       return;
     }
+
+    ipLimiter.record(hashIp(clientIp), now);
 
     try {
       const transactionHash = await mint(config, address);
@@ -261,6 +282,10 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   if (!['https:', ...(env.NODE_ENV === 'production' ? [] : ['http:'])].includes(rpcUrl.protocol)) {
     throw new Error('FAUCET_RPC_URL must use HTTPS in production.');
   }
+  const ipCooldownMs = Number(env.FAUCET_IP_COOLDOWN_MS ?? String(DEFAULT_IP_COOLDOWN_MS));
+  if (!Number.isFinite(ipCooldownMs) || ipCooldownMs < 0) {
+    throw new Error('FAUCET_IP_COOLDOWN_MS must be a non-negative number of milliseconds.');
+  }
 
   return {
     allowedOrigin,
@@ -270,5 +295,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
     rpcUrl: rpcUrl.toString(),
     amount,
     tokenDecimals,
+    ipCooldownMs,
   };
 }
