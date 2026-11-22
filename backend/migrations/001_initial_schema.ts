@@ -56,9 +56,27 @@ const migration: Migration = {
       wallet_address  TEXT    PRIMARY KEY,
       claimed_at_ms   INTEGER NOT NULL
     );
+
+    -- -----------------------------------------------------------------------
+    -- Seen events table
+    -- Deduplication records for the contract event watcher. Each row is a
+    -- (ledger sequence, transaction hash) pair already processed, so replays
+    -- after restarts or ledger reorgs are silently skipped.
+    -- -----------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS seen_events (
+      ledger_sequence INTEGER NOT NULL,
+      tx_hash         TEXT    NOT NULL,
+      created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (ledger_sequence, tx_hash)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_seen_events_created_at
+      ON seen_events (created_at);
   `,
 
   down: `
+    DROP INDEX IF EXISTS idx_seen_events_created_at;
+    DROP TABLE IF EXISTS seen_events;
     DROP TABLE IF EXISTS faucet_claims;
     DROP TABLE IF EXISTS events;
     DROP TABLE IF EXISTS subscriptions;

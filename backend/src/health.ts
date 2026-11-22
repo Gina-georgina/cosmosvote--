@@ -15,6 +15,19 @@ export function createHealthServer(
 
     response.setHeader('Content-Type', 'application/json');
 
+    if (request.method === 'GET' && request.url === '/version') {
+      // Public endpoint — no authentication required.
+      response.writeHead(200);
+      response.end(
+        JSON.stringify({
+          version: process.env.VERSION || 'unknown',
+          commitSha: process.env.COMMIT_SHA || 'unknown',
+          buildDate: process.env.BUILD_DATE || 'unknown',
+        })
+      );
+      return;
+    }
+
     if (request.method === 'GET' && request.url === '/health') {
       response.writeHead(200);
       response.end(JSON.stringify({ status: 'ok', uptime: getUptime() }));

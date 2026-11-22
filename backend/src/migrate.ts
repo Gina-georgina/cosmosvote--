@@ -61,10 +61,12 @@ interface MigrationRecord {
 // Import all migration modules here in ascending order.
 // New migrations should be appended to this list.
 import migration001 from '../migrations/001_initial_schema';
+import migration002 from '../migrations/002_seen_events';
 
 /** Ordered list of all known migrations. */
 export const ALL_MIGRATIONS: Migration[] = [
   migration001,
+  migration002,
 ];
 
 // ---------------------------------------------------------------------------
