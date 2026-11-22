@@ -2019,6 +2019,68 @@ fn test_set_proposal_cooldown_non_admin_fails() {
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
+// ---------------------------------------------------------------------------
+// Issue #460: update_proposal_cooldown
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_update_proposal_cooldown_succeeds_for_admin() {
+    let env = Env::default();
+    let (gov, _, admin, _, _) = setup(&env);
+    assert_eq!(gov.get_config().proposal_cooldown, 0u64);
+
+    gov.update_proposal_cooldown(&admin, &7_200u64);
+    assert_eq!(gov.get_config().proposal_cooldown, 7_200u64);
+
+    // Updating again overwrites the previous value.
+    gov.update_proposal_cooldown(&admin, &1_800u64);
+    assert_eq!(gov.get_config().proposal_cooldown, 1_800u64);
+}
+
+#[test]
+fn test_update_proposal_cooldown_non_admin_fails() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+    let result = gov.try_update_proposal_cooldown(&voter, &7_200u64);
+    assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
+    // Value must remain unchanged after a rejected call.
+    assert_eq!(gov.get_config().proposal_cooldown, 0u64);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #458: Treasury recipient validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_proposal_rejects_zero_address_treasury_recipient() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+
+    // The all-zeros Stellar public key — no valid keypair can sign for it.
+    let zero_addr = Address::from_string(
+        &String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"),
+    );
+
+    let action = TreasuryAction {
+        recipient: zero_addr,
+        amount: 1_000i128,
+        asset: TreasuryAsset::Token(gov.get_config().voting_token),
+    };
+
+    let result = gov.try_create_proposal(
+        &voter,
+        &String::from_str(&env, "Treasury Disbursement"),
+        &String::from_str(&env, "Attempt to disburse to the zero address"),
+        &5_000_000i128,
+        &604_800u64,
+        &None,
+        &Some(action),
+    );
+    assert_eq!(result, Err(Ok(ContractError::InvalidRecipient)));
+    // No proposal should have been created.
+    assert_eq!(gov.proposal_count(), 0u64);
+}
+
 #[test]
 fn test_set_restrict_admin_vote() {
     let env = Env::default();
