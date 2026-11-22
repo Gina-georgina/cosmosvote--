@@ -146,9 +146,19 @@ export function migrateUp(
   for (const migration of pending) {
     console.info(`[migrate] Applying migration: ${migration.name}`);
     db.transaction(() => {
+      // Re-check inside the transaction to guard against concurrent runners
+      // that may have applied this migration since we built the pending list.
+      const already = db
+        .prepare('SELECT 1 FROM _migrations WHERE name = ? LIMIT 1')
+        .get(migration.name);
+      if (already) {
+        console.info(`[migrate] Skipping already-applied migration: ${migration.name}`);
+        return;
+      }
       db.exec(migration.up);
       db.prepare(
-        'INSERT INTO _migrations (id, name) VALUES (?, ?)',
+        'INSERT OR IGNORE INTO _migrations (id, name, applied_at) ' +
+        'VALUES (?, ?, unixepoch())',
       ).run(migration.id, migration.name);
     })();
     count += 1;
@@ -187,7 +197,14 @@ export function migrateDown(
   console.info(`[migrate] Rolling back migration: ${migration.name}`);
   db.transaction(() => {
     db.exec(migration.down);
-    db.prepare('DELETE FROM _migrations WHERE name = ?').run(migration.name);
+    const result = db
+      .prepare('DELETE FROM _migrations WHERE name = ?')
+      .run(migration.name);
+    if (result.changes === 0) {
+      throw new Error(
+        `[migrate] Failed to remove tracking record for "${migration.name}".`,
+      );
+    }
   })();
   console.info(`[migrate] Rolled back: ${migration.name}`);
   return migration.name;

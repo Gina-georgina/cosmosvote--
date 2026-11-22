@@ -27,6 +27,20 @@ const envSchema = z.object({
 
   GOVERNANCE_CONTRACT_ID: z.string().min(1, 'GOVERNANCE_CONTRACT_ID is required'),
 
+  TOKEN_CONTRACT_ID: z.string().min(1).optional(),
+
+  ALLOWED_CONTRACT_IDS: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : [],
+    ),
+
   WEBHOOK_URL: z.string().url('WEBHOOK_URL must be a valid URL'),
 
   POLL_INTERVAL_MS: z
@@ -56,6 +70,26 @@ const envSchema = z.object({
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+/**
+ * Build the set of contract IDs that subscriptions may target.
+ *
+ * Always includes GOVERNANCE_CONTRACT_ID, plus TOKEN_CONTRACT_ID (if set)
+ * and any additional IDs listed in ALLOWED_CONTRACT_IDS.
+ */
+export function getAllowedContractIds(env: Env): Set<string> {
+  const ids = new Set<string>([env.GOVERNANCE_CONTRACT_ID]);
+
+  if (env.TOKEN_CONTRACT_ID) {
+    ids.add(env.TOKEN_CONTRACT_ID);
+  }
+
+  for (const id of env.ALLOWED_CONTRACT_IDS) {
+    ids.add(id);
+  }
+
+  return ids;
+}
 
 /**
  * Validate process.env against the schema.
