@@ -2,6 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
+import { sendProblem, PROBLEM_TYPES } from './problemJson';
+import { withRequestTimeout } from './requestTimeout';
 import {
   Contract,
   Keypair,
@@ -163,10 +165,14 @@ export function createFaucetServer(
     return normalised === faucetOrigin || isOriginAllowed(origin);
   }
 
-  return createServer(async (request, response) => {
+  return createServer(withRequestTimeout(async (request, response) => {
     const origin = request.headers.origin;
     if (origin && !originAllowed(origin)) {
-      sendJson(response, 403, { error: 'Origin not allowed.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.unauthorized,
+        title: 'Origin Not Allowed',
+        status: 403,
+      });
       return;
     }
     if (origin) {
@@ -181,11 +187,20 @@ export function createFaucetServer(
       return;
     }
     if (request.method !== 'POST' || request.url !== '/api/faucet/claim') {
-      sendJson(response, 404, { error: 'Not found.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.notFound,
+        title: 'Not Found',
+        status: 404,
+      });
       return;
     }
     if (!request.headers['content-type']?.includes('application/json')) {
-      sendJson(response, 415, { error: 'Content-Type must be application/json.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Unsupported Media Type',
+        status: 415,
+        detail: 'Content-Type must be application/json.',
+      });
       return;
     }
 
@@ -194,11 +209,21 @@ export function createFaucetServer(
       const body = await readJson(request);
       address = typeof body === 'object' && body !== null ? (body as { address?: unknown }).address : undefined;
     } catch {
-      sendJson(response, 400, { error: 'Request body must be valid JSON under 2 KB.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Request',
+        status: 400,
+        detail: 'Request body must be valid JSON under 2 KB.',
+      });
       return;
     }
     if (typeof address !== 'string' || !StrKey.isValidEd25519PublicKey(address)) {
-      sendJson(response, 400, { error: 'A valid Stellar public wallet address is required.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Request',
+        status: 400,
+        detail: 'A valid Stellar public wallet address is required.',
+      });
       return;
     }
 
@@ -206,7 +231,12 @@ export function createFaucetServer(
     const retryAt = store.reserve(address, now);
     if (retryAt !== null) {
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
-      sendJson(response, 429, { error: 'This wallet has already claimed test tokens in the last 24 hours.', retryAt });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.tooManyRequests,
+        title: 'Too Many Requests',
+        status: 429,
+        detail: 'This wallet has already claimed test tokens in the last 24 hours.',
+      });
       return;
     }
 
@@ -222,11 +252,14 @@ export function createFaucetServer(
       if (!(error instanceof FaucetMintError) || !error.claimConsumed) {
         store.release(address, now);
       }
-      sendJson(response, 502, {
-        error: error instanceof Error ? error.message : 'Faucet mint failed.',
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Gateway',
+        status: 502,
+        detail: error instanceof Error ? error.message : 'Faucet mint failed.',
       });
     }
-  });
+  }));
 }
 
 export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
