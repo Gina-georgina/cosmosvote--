@@ -52,5 +52,18 @@
   "address_show": "Cliquez pour afficher l'adresse complète",
   "address_hide": "Cliquez pour masquer l'adresse complète",
   "new_proposal": "Nouvelle proposition",
-  "cancel": "Annuler"
+  "cancel": "Annuler",
+
+  "create_success_title": "Proposition créée avec succès",
+  "create_success_id": "ID de la proposition",
+  "create_success_link": "Lien de la proposition",
+  "create_success_share": "Partager la proposition",
+  "create_success_share_copied": "Lien copié dans le presse-papiers",
+  "create_success_share_error": "Impossible de copier le lien",
+  "create_success_next_steps": "Prochaines étapes",
+  "create_success_step_share": "Partagez le lien avec les autres membres de la communauté",
+  "create_success_step_monitor": "Suivez les votes et la progression du quorum",
+  "create_success_step_finalise": "Finalisez la proposition une fois la période de vote terminée",
+  "create_success_view_proposal": "Voir la proposition",
+  "create_success_create_another": "Créer une autre proposition"
 }

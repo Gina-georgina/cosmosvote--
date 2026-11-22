@@ -52,5 +52,15 @@
   "address_show": "Click to reveal full address",
   "address_hide": "Click to hide full address",
   "new_proposal": "New Proposal",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+
+  "create_success_heading": "Proposal created!",
+  "create_success_proposal_id": "Proposal ID",
+  "create_success_deep_link": "Deep link",
+  "create_success_share": "Share proposal",
+  "create_success_copied": "Link copied to clipboard",
+  "create_success_next_steps": "Next steps",
+  "create_success_step_share": "Share the proposal link with your community",
+  "create_success_step_monitor": "Monitor votes and quorum progress",
+  "create_success_step_finalise": "Finalise the proposal once voting ends"
 }

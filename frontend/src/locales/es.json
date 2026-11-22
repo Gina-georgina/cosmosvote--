@@ -52,5 +52,18 @@
   "address_show": "Clic para mostrar dirección completa",
   "address_hide": "Clic para ocultar dirección completa",
   "new_proposal": "Nueva propuesta",
-  "cancel": "Cancelar"
+  "cancel": "Cancelar",
+
+  "create_success_title": "¡Propuesta creada!",
+  "create_success_id": "ID de la propuesta",
+  "create_success_link": "Enlace directo",
+  "create_success_next_steps": "Próximos pasos",
+  "create_success_step_share": "Comparte la propuesta con la comunidad",
+  "create_success_step_monitor": "Sigue los votos y el progreso del quórum",
+  "create_success_step_finalise": "Finaliza la propuesta cuando termine el período de votación",
+  "create_success_share": "Compartir propuesta",
+  "create_success_copied": "¡Enlace copiado!",
+  "create_success_copy_failed": "No se pudo copiar el enlace",
+  "create_success_view": "Ver propuesta",
+  "create_success_new": "Crear otra propuesta"
 }
