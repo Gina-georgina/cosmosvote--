@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
+import { resolveFaucetSecretKey } from './secrets';
 import {
   Contract,
   Keypair,
@@ -234,7 +235,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   const required = [
     'FAUCET_ALLOWED_ORIGIN',
     'FAUCET_TOKEN_CONTRACT_ID',
-    'FAUCET_ADMIN_SECRET_KEY',
   ] as const;
   const missing = required.filter(key => !env[key]);
   if (missing.length) throw new Error(`Faucet is enabled but missing: ${missing.join(', ')}`);
@@ -251,9 +251,14 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   if (new URL(env.FAUCET_ALLOWED_ORIGIN!).protocol !== 'https:' && env.NODE_ENV === 'production') {
     throw new Error('FAUCET_ALLOWED_ORIGIN must use HTTPS in production.');
   }
-  const adminSecretKey = env.FAUCET_ADMIN_SECRET_KEY!;
-  if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
-    throw new Error('FAUCET_ADMIN_SECRET_KEY is invalid.');
+  const adminSecretKey = resolveFaucetSecretKey(env);
+  try {
+    if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
+      throw new Error('invalid public key length');
+    }
+  } catch {
+    // Never include the secret value in the error message.
+    throw new Error('The configured faucet secret key is invalid.');
   }
   const tokenContractId = env.FAUCET_TOKEN_CONTRACT_ID!;
   if (!StrKey.isValidContract(tokenContractId)) throw new Error('FAUCET_TOKEN_CONTRACT_ID is invalid.');
