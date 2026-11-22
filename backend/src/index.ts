@@ -42,11 +42,37 @@ healthServer.listen(healthPort, '0.0.0.0', () => {
 service.start();
 logger.info({ event: 'startup' }, 'notification service started');
 
+// Maximum time to wait for in-flight HTTP requests to finish before forcing
+// the process to exit. Prevents a stuck connection from blocking shutdown
+// indefinitely (e.g. during a rolling deploy or container restart).
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 10000);
+
+function closeServerWithTimeout(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      logger.warn(
+        { event: 'shutdown_timeout', timeoutMs },
+        'forcing shutdown: in-flight requests did not complete in time'
+      );
+      resolve();
+    }, timeoutMs);
+
+    healthServer.close(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
-  healthServer.close();
-  await auditLogger.flush();
+  await closeServerWithTimeout(SHUTDOWN_TIMEOUT_MS);
   await flushErrorTracking();
   process.exit(0);
 }
