@@ -3,7 +3,10 @@ import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
+import { requestContext } from './requestContext';
 import helmet from 'helmet';
+import { randomUUID } from 'crypto';
+import type { IncomingMessage, ServerResponse } from 'http';
 
 // Validate env vars before anything else — fails fast with a clear message.
 const env = loadEnv();
@@ -33,7 +36,26 @@ const securityHeaders = helmet({
   referrerPolicy: { policy: 'strict-origin' },
 });
 
-const healthServer = createHealthServer(() => service.checkReadiness(), securityHeaders);
+// Request-ID middleware. Generates (or echoes) a correlation ID per request,
+// exposes it via AsyncLocalStorage so logger.ts can include it in every log
+// line, and sets the `X-Request-Id` response header on every response.
+export function requestIdMiddleware(
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: () => void,
+): void {
+  const incoming = req.headers['x-request-id'];
+  const requestId =
+    (Array.isArray(incoming) ? incoming[0] : incoming) || randomUUID();
+  res.setHeader('X-Request-Id', requestId);
+  requestContext.run({ requestId }, next);
+}
+
+const healthServer = createHealthServer(
+  () => service.checkReadiness(),
+  securityHeaders,
+  requestIdMiddleware,
+);
 const healthPort = env.HEALTH_PORT;
 healthServer.listen(healthPort, '0.0.0.0', () => {
   console.info(`[cosmosvote-backend] health endpoints listening on port ${healthPort}`);
@@ -41,6 +63,8 @@ healthServer.listen(healthPort, '0.0.0.0', () => {
 
 service.start();
 logger.info({ event: 'startup' }, 'notification service started');
+
+export { requestContext };
 
 async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');

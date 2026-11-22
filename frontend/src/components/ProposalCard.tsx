@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, forwardRef } from 'react';
 import type { Proposal, ProposalState } from '../types';
 import { formatTokenAmount } from '../utils';
 import styles from './ProposalCard.module.css';
@@ -15,6 +15,16 @@ interface Props {
   proposal: Proposal;
   decimals: number;
   onClick: (e?: React.MouseEvent | React.KeyboardEvent) => void;
+  /**
+   * Optional inline styles supplied by the virtualiser (e.g. absolute
+   * positioning / transform). Merged over the card's base styles.
+   */
+  style?: React.CSSProperties;
+  /**
+   * Optional callback ref used by the virtualiser to measure the row height.
+   * Forwarded to the underlying <article> element.
+   */
+  measureRef?: (el: HTMLElement | null) => void;
 }
 
 function formatDate(ts: bigint): string {
@@ -88,7 +98,10 @@ function CountdownTimer({ endTime }: { endTime: bigint }) {
   );
 }
 
-export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
+export const ProposalCard = forwardRef<HTMLElement, Props>(function ProposalCard(
+  { proposal: p, decimals, onClick, style, measureRef },
+  ref,
+) {
   const color = STATE_COLORS[p.state];
   const pct = quorumPct(p);
 
@@ -124,8 +137,23 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
     }
   };
 
+  // Combine the forwarded ref (from the virtualiser) with the optional
+  // measureRef callback so both receive the underlying DOM node.
+  const setRef = useCallback(
+    (el: HTMLElement | null) => {
+      if (typeof ref === 'function') {
+        ref(el);
+      } else if (ref) {
+        (ref as React.MutableRefObject<HTMLElement | null>).current = el;
+      }
+      measureRef?.(el);
+    },
+    [ref, measureRef],
+  );
+
   return (
     <article
+      ref={setRef}
       className="proposal-card"
       onClick={onClick}
       onKeyDown={handleKeyDown}
@@ -141,6 +169,7 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
         transition: 'box-shadow 0.15s, border-color 0.15s',
         outline: 'none',
         position: 'relative',
+        ...style,
       }}
       onMouseEnter={e => (e.currentTarget.style.boxShadow = `0 4px 12px ${color}44`)}
       onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
@@ -238,4 +267,4 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
       </div>
     </article>
   );
-}
+});

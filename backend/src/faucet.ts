@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
 import {
@@ -12,10 +13,15 @@ import {
   rpc as SorobanRpc,
 } from '@stellar/stellar-sdk';
 import Database from 'better-sqlite3';
+import { logger } from './logger';
 
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
+
+function hashWalletAddress(address: string): string {
+  return createHash('sha256').update(address).digest('hex');
+}
 
 export class FaucetClaimStore {
   private readonly db: Database.Database;
@@ -202,9 +208,17 @@ export function createFaucetServer(
       return;
     }
 
+    const walletHash = hashWalletAddress(address);
     const now = Date.now();
     const retryAt = store.reserve(address, now);
     if (retryAt !== null) {
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'rate_limited',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        retryAt: new Date(retryAt).toISOString(),
+      });
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
       sendJson(response, 429, { error: 'This wallet has already claimed test tokens in the last 24 hours.', retryAt });
       return;
@@ -212,6 +226,13 @@ export function createFaucetServer(
 
     try {
       const transactionHash = await mint(config, address);
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'success',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        transactionHash,
+      });
       sendJson(response, 200, {
         amount: tokenAmountDisplay(config.amount, config.tokenDecimals),
         symbol: 'VOTE',
@@ -222,6 +243,13 @@ export function createFaucetServer(
       if (!(error instanceof FaucetMintError) || !error.claimConsumed) {
         store.release(address, now);
       }
+      logger.error({
+        event: 'faucet_claim',
+        outcome: 'failure',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        errorClass: error instanceof Error ? error.name : 'UnknownError',
+      });
       sendJson(response, 502, {
         error: error instanceof Error ? error.message : 'Faucet mint failed.',
       });

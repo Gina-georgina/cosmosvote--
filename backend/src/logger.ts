@@ -15,6 +15,7 @@
  */
 
 import pino from 'pino';
+import { getRequestId } from './requestContext';
 
 /**
  * Fields that must never appear in plain text in log output.
@@ -40,6 +41,14 @@ export const logger = pino({
   base: {
     service: 'cosmosvote-backend',
     pid: process.pid,
+  },
+  /**
+   * Merge the current request ID (from AsyncLocalStorage) into every log
+   * object. No-op when there is no active request context.
+   */
+  mixin() {
+    const requestId = getRequestId();
+    return requestId ? { requestId } : {};
   },
   timestamp: pino.stdTimeFunctions.isoTime,
   redact: {

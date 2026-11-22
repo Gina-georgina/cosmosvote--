@@ -8,6 +8,24 @@ export interface WatcherConfig {
   contractId: string;
   pollIntervalMs: number;
   cursorKey: string;
+  maxRetries?: number;
+}
+
+const BACKOFF_INITIAL_MS = 1_000;
+const BACKOFF_MAX_MS = 60_000;
+const BACKOFF_JITTER_RATIO = 0.2;
+const DEFAULT_MAX_RETRIES = 5;
+
+function resolveMaxRetries(config: WatcherConfig): number {
+  const fromConfig = config.maxRetries;
+  if (typeof fromConfig === 'number' && Number.isFinite(fromConfig) && fromConfig >= 0) {
+    return fromConfig;
+  }
+  const fromEnv = Number(process.env.WATCHER_MAX_RETRIES);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) {
+    return fromEnv;
+  }
+  return DEFAULT_MAX_RETRIES;
 }
 
 export interface ContractEvent {
@@ -25,9 +43,12 @@ export class ContractWatcher {
   private running = false;
   private timer: NodeJS.Timeout | null = null;
   private cursor: string | null = null;
+  private attempt = 0;
+  private readonly maxRetries: number;
 
   constructor(private readonly config: WatcherConfig) {
     this.server = new Horizon.Server(config.horizonUrl);
+    this.maxRetries = resolveMaxRetries(config);
   }
 
   async start(): Promise<void> {
@@ -36,6 +57,7 @@ export class ContractWatcher {
       return;
     }
     this.running = true;
+    this.attempt = 0;
     this.cursor = await this.loadCursor();
     logger.info('ContractWatcher started', { cursor: this.cursor });
     await this.poll();
@@ -60,18 +82,42 @@ export class ContractWatcher {
 
   private async poll(): Promise<void> {
     if (!this.running) return;
+    let delayMs = this.config.pollIntervalMs;
     try {
       const events = await this.fetchEvents();
+      this.attempt = 0;
       for (const event of events) {
         await this.handleEvent(event);
       }
     } catch (err) {
-      logger.error('ContractWatcher poll failed', { error: err });
+      this.attempt += 1;
+      if (this.attempt > this.maxRetries) {
+        logger.error('ContractWatcher exceeded max retries, stopping', {
+          error: err,
+          attempt: this.attempt,
+          maxRetries: this.maxRetries,
+        });
+        await this.stop();
+        return;
+      }
+      delayMs = this.computeBackoffDelay(this.attempt);
+      logger.error('ContractWatcher poll failed, backing off', {
+        error: err,
+        attempt: this.attempt,
+        maxRetries: this.maxRetries,
+        delayMs,
+      });
     } finally {
       if (this.running) {
-        this.timer = setTimeout(() => void this.poll(), this.config.pollIntervalMs);
+        this.timer = setTimeout(() => void this.poll(), delayMs);
       }
     }
+  }
+
+  private computeBackoffDelay(attempt: number): number {
+    const base = Math.min(BACKOFF_MAX_MS, BACKOFF_INITIAL_MS * 2 ** (attempt - 1));
+    const jitter = base * BACKOFF_JITTER_RATIO * (Math.random() * 2 - 1);
+    return Math.max(0, Math.min(BACKOFF_MAX_MS, Math.round(base + jitter)));
   }
 
   private async fetchEvents(): Promise<ContractEvent[]> {
