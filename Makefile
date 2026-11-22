@@ -31,6 +31,7 @@ test-prop:
 test-integration:
 	cargo test -p cosmosvote-governance --test delegation_vote_weight_tests --features testutils
 	cargo test -p cosmosvote-governance --test notification_integration_tests
+	cargo test -p cosmosvote-governance --test integration_tests --features testutils
 
 ## Format code
 fmt:
