@@ -48,3 +48,51 @@ variable "immutable_assets_max_age" {
   type        = number
   default     = 31536000
 }
+
+variable "github_owner" {
+  description = "GitHub user or organization that owns the repository"
+  type        = string
+}
+
+variable "github_repository" {
+  description = "Name of the GitHub repository to manage branch protection for"
+  type        = string
+}
+
+variable "github_token" {
+  description = <<-EOT
+    GitHub token used by the Terraform GitHub provider. Must have admin access to the
+    repository to manage branch protection. Supply via TF_VAR_github_token or a
+    secret-backed CI variable; never commit it to version control.
+  EOT
+  type        = string
+  sensitive   = true
+}
+
+variable "branch_protection_branch" {
+  description = "Branch to protect (e.g. main)"
+  type        = string
+  default     = "main"
+}
+
+variable "required_approving_review_count" {
+  description = "Number of approving reviews required before a PR can be merged"
+  type        = number
+  default     = 1
+  validation {
+    condition     = var.required_approving_review_count >= 0
+    error_message = "required_approving_review_count must be zero or greater."
+  }
+}
+
+variable "required_status_checks" {
+  description = "List of status check contexts that must pass before merging"
+  type        = list(string)
+  default     = []
+}
+
+variable "enforce_admins" {
+  description = "Whether branch protection rules also apply to repository administrators"
+  type        = bool
+  default     = true
+}

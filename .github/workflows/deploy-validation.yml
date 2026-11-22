@@ -13,6 +13,7 @@ on:
       - "scripts/deploy_testnet.sh"
       - "scripts/deploy_mainnet.sh"
       - ".github/workflows/deploy-validation.yml"
+      - "infra/terraform/**"
 
 jobs:
   shellcheck:
@@ -48,3 +49,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Bash syntax check
         run: bash -n scripts/deploy_mainnet.sh
+
+  terraform-plan:
+    name: Terraform fmt/validate/plan (staging)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+      - name: Terraform init (staging backend)
+        run: terraform init -backend-config=envs/staging.s3.tfbackend -input=false
+      - name: Terraform validate
+        run: terraform validate
+      - name: Terraform plan (staging)
+        run: terraform plan -input=false -no-color -var-file=envs/staging.tfvars

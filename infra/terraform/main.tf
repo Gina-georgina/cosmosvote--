@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.4"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 
   # ---------------------------------------------------------------------------
@@ -44,9 +48,12 @@ terraform {
   #   terraform init -backend-config="envs/staging.s3.tfbackend"
   #   terraform init -backend-config="envs/production.s3.tfbackend"
   # ---------------------------------------------------------------------------
+  # The state key is intentionally omitted here so that each environment
+  # selects its own state file via -backend-config (see infra/terraform/envs/):
+  #   staging    -> key = "cosmosvote/staging/terraform.tfstate"
+  #   production -> key = "cosmosvote/production/terraform.tfstate"
   backend "s3" {
     bucket         = "cosmosvote-tfstate"
-    key            = "cosmosvote/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "cosmosvote-tfstate-lock"
@@ -55,6 +62,13 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+}
+
+# GitHub provider — used to manage repository settings (branch protection).
+# Authenticate via the GITHUB_TOKEN environment variable in CI.
+provider "github" {
+  owner = var.github_owner
+  token = var.github_token
 }
 
 # CloudFront requires ACM certs in us-east-1
@@ -323,4 +337,32 @@ resource "aws_cloudfront_distribution" "frontend" {
   viewer_certificate {
     cloudfront_default_certificate = true
   }
+}
+
+# ─── GitHub branch protection ─────────────────────────────────────────────────
+# Branch protection for `main` is managed in code so it is version-controlled
+# and cannot be silently removed from the GitHub UI.
+resource "github_branch_protection" "main" {
+  repository_id = var.github_repository
+  pattern       = "main"
+
+  # Require a pull request with at least one approving review before merging.
+  required_pull_request_reviews {
+    dismiss_stale_reviews           = true
+    require_code_owner_reviews      = false
+    required_approving_review_count = 1
+  }
+
+  # Require the canonical CI status checks to pass before merging.
+  required_status_checks {
+    strict   = true
+    contexts = var.required_status_checks
+  }
+
+  # No force pushes and no branch deletion.
+  allows_force_pushes = false
+  allows_deletions    = false
+
+  # Require conversation resolution before merging.
+  require_conversation_resolution = true
 }

@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Builder stage ────────────────────────────────────────────────────────────
+# Buildable independently via: docker build --target builder .
 FROM rust:1.75-slim-bookworm@sha256:70c2a016184099262fd7cee46f3d35fec3568c45c62f87e37f7f665f766b1f74 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,6 +27,7 @@ COPY . .
 RUN cargo build --release --target wasm32-unknown-unknown
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
+# Buildable independently via: docker build --target runtime .
 FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -64,11 +64,16 @@ updates:
     auto-merge: true
 
   # ── GitHub Actions ────────────────────────────────────────────────────
+  # Actions are pinned to full 40-character commit SHAs in the workflow
+  # files. Dependabot rewrites those SHA pins (keeping the trailing
+  # `# vX.Y.Z` comment in sync) so the pins stay current without ever
+  # falling back to mutable tags.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - ci

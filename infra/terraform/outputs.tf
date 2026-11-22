@@ -27,3 +27,14 @@ output "no_cache_html_policy_id" {
   description = "CloudFront cache policy ID used for HTML (no-cache)"
   value       = aws_cloudfront_cache_policy.no_cache_html.id
 }
+
+output "protected_branch" {
+  description = "Branch name protected by Terraform-managed branch protection rules"
+  value       = github_branch_protection.main.pattern
+}
+
+output "required_status_checks" {
+  description = "Status checks required to pass before merging into the protected branch"
+  value       = github_branch_protection.main.required_status_checks[*].context
+}
+</output>

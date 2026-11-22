@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
@@ -222,6 +222,48 @@ jobs:
       - name: Run actionlint
         run: actionlint -color
 
+  zizmor:
+    name: Lint GitHub Actions (zizmor)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@e673c3917a1aef3c65c972347ed84ccd013ecda4 # v0.2.0
+        with:
+          advanced-security: false
+      - name: Verify all actions are pinned to full commit SHAs
+        run: |
+          set -euo pipefail
+          # Match every `uses:` value in the workflows directory.
+          refs=$(grep -rhoE '^\s*-?\s*uses:\s*[^[:space:]]+' .github/workflows/ \
+            | sed -E 's/^\s*-?\s*uses:\s*//' \
+            | sort -u)
+          if [ -z "$refs" ]; then
+            echo "Error: no uses: directives found in .github/workflows/"
+            exit 1
+          fi
+          failed=0
+          while IFS= read -r ref; do
+            # Local actions (./path) and docker:// references are out of scope.
+            case "$ref" in
+              ./*|docker://*) continue ;;
+            esac
+            action="${ref%@*}"
+            pin="${ref##*@}"
+            if ! printf '%s' "$pin" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "Mutable or invalid ref: $ref (expected <owner>/<repo>@<40-hex-sha>)"
+              failed=1
+            fi
+          done <<< "$refs"
+          if [ "$failed" -ne 0 ]; then
+            echo "Error: one or more GitHub Actions are not pinned to a full commit SHA."
+            exit 1
+          fi
+          echo "All GitHub Actions are pinned to full commit SHAs."
+
   frontend-coverage:
     name: Frontend Coverage
     runs-on: ubuntu-latest
@@ -258,6 +300,7 @@ jobs:
       - license-check
       - coverage
       - actionlint
+      - zizmor
       - frontend-coverage
     if: ${{ always() && github.event_name == 'push' && contains(fromJson('["main", "develop"]'), github.ref_name) }}
     env:
@@ -277,6 +320,7 @@ jobs:
             "License Compliance:${{ needs.license-check.result }}" \
             "Contract Coverage:${{ needs.coverage.result }}" \
             "Lint GitHub Actions:${{ needs.actionlint.result }}" \
+            "Lint GitHub Actions (zizmor):${{ needs.zizmor.result }}" \
             "Frontend Coverage:${{ needs.frontend-coverage.result }}"; do
             name="${job_result%%:*}"
             result="${job_result##*:}"

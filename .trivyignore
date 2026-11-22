@@ -7,3 +7,33 @@
 #
 # Keep this file lean. Every entry should be reviewed and re-evaluated each quarter.
 # Reference: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#trivyignore
+#
+# ---------------------------------------------------------------------------
+# Trivy failure thresholds (see .github/workflows/docker-image-scan.yml)
+# ---------------------------------------------------------------------------
+# Both the `builder` and `runtime` Docker image stages are scanned.
+#
+#   CRITICAL  -> FAILS the build. A CRITICAL CVE cannot be merged unless it is
+#                explicitly suppressed in this file (with a justification) or a
+#                fix is available and applied.
+#   HIGH      -> Produces a WARNING (does not fail the build) and automatically
+#                opens a tracking issue so the finding is triaged and remediated.
+#   MEDIUM/LOW-> Reported in the uploaded scan artefact only; no gating.
+#
+# Scan results (JSON/SARIF) are uploaded as CI artefacts for every run.
+#
+# ---------------------------------------------------------------------------
+# Review process for entries in this ignore file
+# ---------------------------------------------------------------------------
+# 1. Every entry MUST include a comment explaining why it is suppressed
+#    (e.g. false positive, not reachable, no fix available yet).
+# 2. Entries are reviewed and re-evaluated each quarter. Entries that are no
+#    longer applicable (fix released, code path removed) MUST be deleted.
+# 3. Suppressing a CRITICAL CVE requires sign-off from a maintainer and a
+#    linked tracking issue for remediation.
+# 4. Prefer upgrading the base image or dependency over adding an entry here.
+#
+# ---------------------------------------------------------------------------
+# Suppressed CVEs (one per line, with justification)
+# ---------------------------------------------------------------------------
+# (none currently)

@@ -1,5 +1,7 @@
 # Staging environment backend config.
 # Usage: terraform init -backend-config="envs/staging.s3.tfbackend"
+# This uses a distinct state key (cosmosvote/staging/terraform.tfstate) to
+# separate staging state from production and avoid cross-environment changes.
 bucket         = "cosmosvote-tfstate"
 key            = "cosmosvote/staging/terraform.tfstate"
 region         = "us-east-1"

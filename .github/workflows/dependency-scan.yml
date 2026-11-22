@@ -25,9 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd7ee9c24d4c9f2c4e2b # stable
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a37010ded18ff788be44ed8e51f3c71902cd317c # v2
         with:
           tool: cargo-deny
       - name: Run cargo deny check licenses
