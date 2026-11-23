@@ -56,8 +56,9 @@ const VOTE_CONFIG: Array<{
 ];
 
 export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddress, onClose, triggerRef }: Props) {
-  // Get signTransaction from the wallet store so votes can be signed by the real wallet.
-  const { signTransaction } = useWallet();
+  // Get signTransaction and refreshBalance from the wallet store so votes can be
+  // signed by the real wallet and the header balance stays in sync.
+  const { signTransaction, refreshBalance } = useWallet();
 
   const [hasVoted, setHasVoted] = useState<boolean | null>(null);
   const [voteRecord, setVoteRecord] = useState<{ vote: string; weight: bigint } | null>(null);
@@ -67,6 +68,9 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
   const [showFullProposer, setShowFullProposer] = useState(false);
   // For multi-choice proposals: the index the user has selected (null = none selected yet)
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState<number | null>(null);
+  // Share button feedback: 'idle' | 'copied' | 'error'
+  const [shareState, setShareState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const shareResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Live tally — starts from the prop and updates via polling
   const [tally, setTally] = useState<{ yes: bigint; no: bigint; abstain: bigint }>({
@@ -153,6 +157,43 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
       triggerRef?.current?.focus();
     };
   }, [triggerRef]);
+
+  // Clear any pending "Copied!" reset timer on unmount
+  useEffect(() => {
+    return () => {
+      if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
+    };
+  }, []);
+
+  // Copy the canonical deep-link URL for this proposal to the clipboard.
+  const handleShare = useCallback(async () => {
+    const url = `${window.location.origin}/?proposal=${String(p.id)}`;
+    const showFeedback = (state: 'copied' | 'error') => {
+      setShareState(state);
+      if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
+      shareResetTimer.current = setTimeout(() => setShareState('idle'), 2_000);
+    };
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        showFeedback('copied');
+      } else {
+        // Fallback for browsers without the Clipboard API
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showFeedback(ok ? 'copied' : 'error');
+      }
+    } catch {
+      showFeedback('error');
+    }
+  }, [p.id]);
 
   // Move focus to the confirmation message after a successful vote
   useEffect(() => {
@@ -244,6 +285,8 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
           `Your vote "${voteLabel}" on proposal #${String(p.id)} has been submitted.`,
         ),
       );
+      // Refresh the header token balance so it reflects the post-vote state.
+      void refreshBalance();
     } catch (e) {
       setVoteError(`Vote failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
@@ -271,14 +314,33 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
         {/* Skeleton pulse animation */}
         <style>{`@keyframes pulse{0%,100%{background-position:100% 50%}50%{background-position:0% 50%}}`}</style>
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h2 id="proposal-dialog-title" style={{ margin: 0 }}>Proposal #{String(p.id)}</h2>
-          <button
-            ref={closeButtonRef}
-            onClick={onClose}
-            aria-label="Close proposal detail dialog"
-            style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
-          >×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              onClick={() => void handleShare()}
+              aria-label="Copy link to this proposal"
+              title="Copy link to this proposal"
+              style={{
+                background: shareState === 'copied' ? '#dcfce7' : '#eff6ff',
+                border: `1px solid ${shareState === 'copied' ? '#86efac' : '#bfdbfe'}`,
+                borderRadius: 6,
+                color: shareState === 'copied' ? '#166534' : '#1d4ed8',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                padding: '0.3rem 0.6rem',
+              }}
+            >
+              {shareState === 'copied' ? '✓ Copied!' : shareState === 'error' ? '⚠️ Copy failed' : '🔗 Share'}
+            </button>
+            <button
+              ref={closeButtonRef}
+              onClick={onClose}
+              aria-label="Close proposal detail dialog"
+              style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
+            >×</button>
+          </div>
         </div>
 
         <h3 style={{ margin: '0 0 0.5rem' }}>{safeTitle}</h3>
