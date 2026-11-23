@@ -23,6 +23,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { formatTokenAmount, maskAddress, sanitizeWalletMessage } from '../utils';
 import { explorerAccountUrl } from '../config';
 import { usePolling } from '../hooks/usePolling';
+import { Spinner } from './Spinner';
 
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
@@ -559,6 +560,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                       }}
                       disabled={!canVote || isVoting || selectedChoiceIndex === null}
                       aria-disabled={!canVote || isVoting || selectedChoiceIndex === null}
+                      aria-busy={isVoting}
                       style={{
                         padding: '0.6rem 1.25rem',
                         background: !canVote || isVoting || selectedChoiceIndex === null ? '#e5e7eb' : '#2563eb',
@@ -568,9 +570,20 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                         cursor: !canVote || isVoting || selectedChoiceIndex === null ? 'not-allowed' : 'pointer',
                         fontWeight: 600,
                         fontSize: '0.875rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
                       }}
                     >
-                      {isVoting ? 'Submitting…' : 'Submit Vote'}
+                      {isVoting ? (
+                        <>
+                          <Spinner size={16} label="Submitting vote" />
+                          Submitting…
+                        </>
+                      ) : (
+                        'Submit Vote'
+                      )}
                     </button>
                   </fieldset>
                 ) : (
@@ -619,6 +632,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                                 : `${label} (shortcut: ${shortcut})`
                         }
                         disabled={isDisabled || isVoting}
+                        aria-busy={isVoting}
                         style={{
                           padding: '0.75rem',
                           background: isDisabled || isVoting ? '#e5e7eb' : color,
@@ -629,10 +643,19 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                           fontWeight: 500,
                           opacity: isDisabled || isVoting ? 0.6 : 1,
                           position: 'relative',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.5rem',
                         }}
                       >
                         {isVoting
-                          ? 'Submitting…'
+                          ? (
+                            <>
+                              <Spinner size={16} label="Submitting vote" />
+                              Submitting…
+                            </>
+                          )
                           : <>{emoji} {label} <kbd style={{ fontSize: '0.65rem', opacity: 0.75, marginLeft: '0.25rem' }}>{shortcut}</kbd></>
                         }
                       </button>

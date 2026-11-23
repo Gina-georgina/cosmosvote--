@@ -18,6 +18,8 @@ import { useTheme } from './useTheme';
 import { useMeta } from './useMeta';
 import { useWallet } from './WalletContext';
 import { useProposalStore } from './store/proposalStore';
+import { useDebounce } from './hooks/useDebounce';
+import en from './locales/en.json';
 import './responsive.css';
 
 const ALL_STATES: ProposalState[] = ['Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
@@ -88,7 +90,6 @@ export default function App() {
   const [selected, setSelected] = useState<Proposal | null>(null);
   const [rpcWarning, setRpcWarning] = useState<string | null>(null);
   const [showFullAddress, setShowFullAddress] = useState(false);
-  const [page, setPage] = useState(1);
   // Tab navigation — proposals / dashboard / treasury
   const [activeTab, setActiveTab] = useState<AppTab>('proposals');
   // Loading states for dashboard and treasury tabs
@@ -409,7 +410,46 @@ export default function App() {
                 <ProposalSkeleton />
               </>
             )}
-            {!loading && !error && filtered.length === 0 && (
+            {!loading && !error && proposals.length === 0 && (
+              <div
+                role="status"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '3rem 1rem',
+                  background: 'var(--bg-stat, #fff)',
+                  border: '1px dashed var(--border-color, #e2e8f0)',
+                  borderRadius: 10,
+                  textAlign: 'center',
+                }}
+              >
+                <span aria-hidden="true" style={{ fontSize: '3rem', lineHeight: 1 }}>🗳️</span>
+                <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 600 }}>
+                  {en.emptyState.title}
+                </p>
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem', maxWidth: 420 }}>
+                  {en.emptyState.message}
+                </p>
+                {walletAddress ? (
+                  <button
+                    onClick={() => setActiveTab('proposals')}
+                    style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.875rem' }}
+                  >
+                    {en.emptyState.createProposal}
+                  </button>
+                ) : (
+                  <button
+                    onClick={openModal}
+                    style={{ background: 'none', color: '#2563eb', border: '1px solid #2563eb', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.875rem' }}
+                  >
+                    {en.emptyState.connectWallet}
+                  </button>
+                )}
+              </div>
+            )}
+            {!loading && !error && proposals.length > 0 && filtered.length === 0 && (
               <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No proposals found.</p>
             )}
             {!loading && pagedProposals.map(p => (
@@ -476,7 +516,6 @@ export default function App() {
       {/* ── Modals ── */}
 
       {selected && (
-        <ProposalDetail
         <ProposalDetail
           proposal={selected}
           decimals={decimals}
