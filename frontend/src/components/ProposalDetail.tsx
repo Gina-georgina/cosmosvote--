@@ -27,6 +27,41 @@ import { usePolling } from '../hooks/usePolling';
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
 
+/** Token symbol shown next to formatted vote weights. */
+const TOKEN_SYMBOL = import.meta.env.VITE_TOKEN_SYMBOL ?? 'CVT';
+
+/** Format a raw i128 weight as a human-readable token amount with symbol. */
+function formatWeight(weight: bigint, decimals: number): string {
+  return `${formatTokenAmount(weight, decimals)} ${TOKEN_SYMBOL}`;
+}
+
+/** Copy text to the clipboard, falling back to a hidden textarea + execCommand. */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to legacy fallback
+  }
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+=======
+
 interface Props {
   proposal: Proposal;
   decimals: number;
@@ -65,6 +100,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
   const [voteConfirmation, setVoteConfirmation] = useState<string | null>(null);
   const [voteError, setVoteError] = useState<string | null>(null);
   const [showFullProposer, setShowFullProposer] = useState(false);
+  const [copiedProposer, setCopiedProposer] = useState(false);
   // For multi-choice proposals: the index the user has selected (null = none selected yet)
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState<number | null>(null);
 
@@ -322,6 +358,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                     target="_blank"
                     rel="noopener noreferrer"
                     title={p.proposer}
+                    aria-label={p.proposer}
                     style={{ color: '#2563eb', textDecoration: 'none' }}
                   >
                     {showFullProposer ? p.proposer : shortAddress}
@@ -333,12 +370,31 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                   >
                     {showFullProposer ? '🙈' : '👁'}
                   </button>
+                  <button
+                    onClick={() => {
+                      void copyToClipboard(p.proposer).then(ok => {
+                        if (ok) {
+                          setCopiedProposer(true);
+                          setTimeout(() => setCopiedProposer(false), 1_500);
+                        }
+                      });
+                    }}
+                    aria-label={copiedProposer ? 'Proposer address copied' : 'Copy proposer address'}
+                    title={copiedProposer ? 'Copied!' : 'Copy address'}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '0.75rem', padding: 0 }}
+                  >
+                    {copiedProposer ? '✅' : '📋'}
+                  </button>
                 </span>
               )],
               ['Start', formatDate(p.start_time)],
               ['End', formatDate(p.end_time)],
-              ['Quorum', formatTokenAmount(p.quorum, decimals)],
-              ['Total Votes', formatTokenAmount(total, decimals)],
+              ['Quorum', (
+                <span title={String(p.quorum)}>{formatWeight(p.quorum, decimals)}</span>
+              )],
+              ['Total Votes', (
+                <span title={String(total)}>{formatWeight(total, decimals)}</span>
+              )],
             ].map(([k, v]) => (
               <tr key={String(k)} style={{ borderBottom: '1px solid #e5e7eb' }}>
                 <td style={{ padding: '0.4rem 0', color: '#888', width: '40%' }}>{k}</td>
@@ -365,15 +421,15 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', textAlign: 'center' }}>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#16a34a' }}>{formatTokenAmount(tally.yes, decimals)}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#16a34a' }} title={String(tally.yes)}>{formatWeight(tally.yes, decimals)}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Yes</div>
               </div>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#dc2626' }}>{formatTokenAmount(tally.no, decimals)}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#dc2626' }} title={String(tally.no)}>{formatWeight(tally.no, decimals)}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>No</div>
               </div>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#6b7280' }}>{formatTokenAmount(tally.abstain, decimals)}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#6b7280' }} title={String(tally.abstain)}>{formatWeight(tally.abstain, decimals)}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Abstain</div>
               </div>
             </div>
@@ -493,7 +549,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             {hasVoted && voteRecord && !voteConfirmation && (
               <span>
                 You voted <strong>{voteRecord.vote}</strong> with weight{' '}
-                {formatTokenAmount(voteRecord.weight, decimals)}
+                <span title={String(voteRecord.weight)}>{formatWeight(voteRecord.weight, decimals)}</span>
               </span>
             )}
 

@@ -56,4 +56,26 @@ describe('ProposalDetail', () => {
     render(<ProposalDetail proposal={mockProposal} decimals={0} walletAddress="GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" onClose={vi.fn()} />);
     expect(screen.getByText('Checking vote status...')).toBeInTheDocument();
   });
+
+  it('renders formatted vote weights with raw value in title', () => {
+    render(<ProposalDetail proposal={mockProposal} decimals={2} walletAddress={null} onClose={vi.fn()} />);
+    expect(screen.getByText('3.00 CVT')).toBeInTheDocument();
+    expect(screen.getByText('1.00 CVT')).toBeInTheDocument();
+    expect(screen.getByText('0.50 CVT')).toBeInTheDocument();
+    expect(screen.getByTitle('300')).toBeInTheDocument();
+    expect(screen.getByTitle('100')).toBeInTheDocument();
+    expect(screen.getByTitle('50')).toBeInTheDocument();
+  });
+
+  it('sets title and aria-label to full proposer address', () => {
+    render(<ProposalDetail proposal={mockProposal} decimals={0} walletAddress={null} onClose={vi.fn()} />);
+    const addressEl = screen.getByLabelText(mockProposal.proposer);
+    expect(addressEl).toHaveAttribute('title', mockProposal.proposer);
+    expect(addressEl).toHaveAttribute('aria-label', mockProposal.proposer);
+  });
+
+  it('renders a copy-to-clipboard button next to the address', () => {
+    render(<ProposalDetail proposal={mockProposal} decimals={0} walletAddress={null} onClose={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+  });
 });
