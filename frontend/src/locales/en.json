@@ -52,5 +52,9 @@
   "address_show": "Click to reveal full address",
   "address_hide": "Click to hide full address",
   "new_proposal": "New Proposal",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+
+  "discussion_url_label": "Discussion Link",
+  "discussion_url_placeholder": "https://...",
+  "discussion_url_invalid": "Discussion link must be a valid HTTPS URL"
 }

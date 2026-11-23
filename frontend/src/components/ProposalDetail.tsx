@@ -23,6 +23,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { formatTokenAmount, maskAddress, sanitizeWalletMessage } from '../utils';
 import { explorerAccountUrl } from '../config';
 import { usePolling } from '../hooks/usePolling';
+import { ConfirmModal } from './ConfirmModal';
+import { AriaLive } from './AriaLive';
 
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
@@ -77,6 +79,14 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [secondsAgo, setSecondsAgo] = useState<number | null>(null);
 
+  // Admin cancel confirmation flow — Issue #384
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+
+  // AriaLive announcement for tally changes — Issue #397
+  const [tallyAnnouncement, setTallyAnnouncement] = useState('');
+  const prevTallyRef = useRef<string | null>(null);
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   // Ref to the confirmation message — focus moves here after a successful vote
@@ -93,6 +103,14 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
   // Poll every TALLY_POLL_INTERVAL ms while Active
   usePolling(fetchTally, { interval: TALLY_POLL_INTERVAL, enabled: isProposalActive });
+
+  // Announce tally changes to screen readers at most once per polling cycle — Issue #397
+  useEffect(() => {
+    const tallyString = `Yes ${String(tally.yes)}, No ${String(tally.no)}, Abstain ${String(tally.abstain)}`;
+    if (prevTallyRef.current === tallyString) return;
+    prevTallyRef.current = tallyString;
+    setTallyAnnouncement(`Tally updated: ${tallyString}`);
+  }, [tally]);
 
   // Update "X seconds ago" display every second
   useEffect(() => {
@@ -225,6 +243,18 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
     ? (p.choices ?? []).map(choice => sanitizeWalletMessage(choice))
     : [];
 
+  // Close the cancel confirmation modal without cancelling
+  function closeCancelConfirm() {
+    setShowCancelConfirm(false);
+    setCancelReason('');
+  }
+
+  // Submit the cancellation only after explicit confirmation — Issue #384
+  async function handleConfirmCancel() {
+    await cancelProposal(Number(p.id), cancelReason);
+    closeCancelConfirm();
+  }
+
   // Submit a vote via the connected wallet. Signs and broadcasts a real Soroban transaction.
   async function handleVote(voteInput: VoteInput) {
     if (!canVote || !walletAddress) return;
@@ -283,6 +313,9 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         <h3 style={{ margin: '0 0 0.5rem' }}>{safeTitle}</h3>
         <p style={{ color: '#555' }}>{safeDescription}</p>
+
+        {/* Screen-reader announcement for tally changes — Issue #397 */}
+        <AriaLive polite={tallyAnnouncement} />
 
         {/* Discussion link — shown only when discussion_url is a valid HTTPS URL */}
         {p.discussion_url && /^https:\/\/.+/.test(p.discussion_url) && (
@@ -687,7 +720,54 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             ℹ️ Voting is not open yet or has ended for this proposal
           </div>
         )}
+
+        {/* Admin cancel action — opens confirmation modal instead of cancelling immediately (Issue #384) */}
+        {walletAddress && adminAddress && walletAddress === adminAddress && isProposalActive && (
+          <div style={{ marginTop: '1rem' }}>
+            <button
+              onClick={() => setShowCancelConfirm(true)}
+              style={{
+                padding: '0.6rem 1.25rem',
+                background: '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '0.875rem',
+              }}
+            >
+              Cancel Proposal
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Confirmation modal — Escape closes without cancelling */}
+      {showCancelConfirm && (
+        <ConfirmModal
+          title="Cancel proposal?"
+          message={`Are you sure you want to cancel "${safeTitle}"? This action is irreversible and cannot be undone.`}
+          confirmLabel="Cancel Proposal"
+          cancelLabel="Keep Proposal"
+          onConfirm={() => void handleConfirmCancel()}
+          onClose={closeCancelConfirm}
+        >
+          <label
+            htmlFor="cancel-reason"
+            style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.35rem' }}
+          >
+            Reason (optional)
+          </label>
+          <textarea
+            id="cancel-reason"
+            value={cancelReason}
+            onChange={e => setCancelReason(e.target.value)}
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem', borderRadius: 6, border: '1px solid #d1d5db', fontSize: '0.875rem' }}
+          />
+        </ConfirmModal>
+      )}
     </div>
   );
 }

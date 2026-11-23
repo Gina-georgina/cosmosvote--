@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import type { Proposal, ProposalState, VoteRecord } from './types';
 import { fetchAllProposals, fetchTokenDecimals, checkRpcReachability } from './api';
 import { ProposalCard } from './components/ProposalCard';
@@ -11,7 +11,6 @@ import { Pagination } from './components/Pagination';
 import { ConnectWalletModal } from './components/ConnectWalletModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AriaLive } from './components/AriaLive';
-import { GovernanceAnalytics } from './components/GovernanceAnalytics';
 import { ACTIVE_NETWORK } from './config';
 import { formatTokenAmount, maskAddress } from './utils';
 import { useTheme } from './useTheme';
@@ -19,6 +18,11 @@ import { useMeta } from './useMeta';
 import { useWallet } from './WalletContext';
 import { useProposalStore } from './store/proposalStore';
 import './responsive.css';
+
+// Lazy-loaded heavy tab components (Issue #396) — split into separate chunks so
+// they are only fetched when the user actually visits the relevant tab.
+const GovernanceAnalytics = lazy(() => import('./components/GovernanceAnalytics'));
+const DelegationPanel = lazy(() => import('./components/DelegationPanel'));
 
 const ALL_STATES: ProposalState[] = ['Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
 const PAGE_SIZE = 20;
@@ -439,16 +443,25 @@ export default function App() {
             />
           )}
 
-          {/* ── Governance Analytics (Issue #129) ── */}
+          {/* ── Governance Analytics (Issue #129) — lazy-loaded (Issue #396) ── */}
           {!loading && proposals.length > 0 && (
-            <GovernanceAnalytics
-              proposals={proposals}
-              decimals={decimals}
-              votedMap={votedMapBigInt}
-              onRefresh={() =>
-                fetchAllProposals().then(setProposals).catch(() => {})
-              }
-            />
+            <Suspense fallback={<DashboardSkeleton />}>
+              <GovernanceAnalytics
+                proposals={proposals}
+                decimals={decimals}
+                votedMap={votedMapBigInt}
+                onRefresh={() =>
+                  fetchAllProposals().then(setProposals).catch(() => {})
+                }
+              />
+            </Suspense>
+          )}
+
+          {/* ── Delegation Panel — lazy-loaded (Issue #396) ── */}
+          {!loading && proposals.length > 0 && (
+            <Suspense fallback={<DashboardSkeleton />}>
+              <DelegationPanel />
+            </Suspense>
           )}
         </main>
       </ErrorBoundary>
