@@ -121,6 +121,14 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onClick(e);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const cards = Array.from(document.querySelectorAll<HTMLElement>('.proposal-card'));
+      const idx = cards.indexOf(e.currentTarget as HTMLElement);
+      const next = e.key === 'ArrowDown' ? cards[idx + 1] : cards[idx - 1];
+      if (next) next.focus();
     }
   };
 
