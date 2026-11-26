@@ -324,6 +324,7 @@ export default function App() {
             loadingDashboard
               ? <DashboardSkeleton />
               : (
+                <ErrorBoundary>
                 <UserDashboard
                   walletAddress={walletAddress}
                   tokenBalance={tokenBalance}
@@ -333,6 +334,7 @@ export default function App() {
                   onCreateProposal={() => setActiveTab('proposals')}
                   onDisconnect={disconnect}
                 />
+                </ErrorBoundary>
               )
           )}
 
@@ -441,6 +443,7 @@ export default function App() {
 
           {/* ── Governance Analytics (Issue #129) ── */}
           {!loading && proposals.length > 0 && (
+            <ErrorBoundary>
             <GovernanceAnalytics
               proposals={proposals}
               decimals={decimals}
@@ -449,6 +452,7 @@ export default function App() {
                 fetchAllProposals().then(setProposals).catch(() => {})
               }
             />
+            </ErrorBoundary>
           )}
         </main>
       </ErrorBoundary>
