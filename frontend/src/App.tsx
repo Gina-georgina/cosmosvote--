@@ -22,7 +22,7 @@ import { useI18n } from './I18nContext';
 import './responsive.css';
 
 const ALL_STATES: ProposalState[] = ['Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 // Admin address — in production this would come from the contract or environment config
 const ADMIN_ADDRESS = import.meta.env.VITE_ADMIN_ADDRESS ?? null;
@@ -51,7 +51,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
 
-  // ── URL-synced search / filter / page state (Issue #17 + #19) ───────────
+  // ── URL-synced search / filter / page state (Issue #17 + #19 + #377) ───
   // Initialise from query string so deep links and browser back/forward work.
   const params = new URLSearchParams(window.location.search);
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -63,19 +63,18 @@ export default function App() {
   // Debounced search — 300 ms delay (Issue #17)
   const debouncedSearch = useDebounce(search, 300);
 
-  // Sync search + stateFilter to URL without triggering a navigation (Issue #17)
+  // Sync search + stateFilter + page to URL without triggering a navigation (Issue #17 + #377)
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (debouncedSearch) sp.set('q', debouncedSearch); else sp.delete('q');
     if (stateFilter !== 'All') sp.set('state', stateFilter); else sp.delete('state');
-    // preserve page
     if (page > 1) sp.set('page', String(page)); else sp.delete('page');
     const newSearch = sp.toString();
     const newUrl = newSearch ? `?${newSearch}` : window.location.pathname;
     window.history.replaceState(null, '', newUrl);
   }, [debouncedSearch, stateFilter, page]);
 
-  // Restore state from URL on popstate (browser back/forward) (Issue #17)
+  // Restore state from URL on popstate (browser back/forward) (Issue #17 + #377)
   useEffect(() => {
     const onPop = () => {
       const sp = new URLSearchParams(window.location.search);
@@ -441,8 +440,8 @@ export default function App() {
               totalPages={totalPages}
               totalCount={filtered.length}
               pageSize={PAGE_SIZE}
-              onPrev={() => goToPage(Math.max(1, safePage - 1))}
-              onNext={() => goToPage(Math.min(totalPages, safePage + 1))}
+              onPrev={() => goToPage(safePage - 1)}
+              onNext={() => goToPage(safePage + 1)}
               onPage={goToPage}
             />
           )}

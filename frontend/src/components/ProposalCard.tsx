@@ -93,6 +93,61 @@ function CountdownTimer({ endTime }: { endTime: bigint }) {
   );
 }
 
+/**
+ * CopyButton copies the given text to the clipboard, falling back to
+ * document.execCommand('copy') for environments without the Clipboard API.
+ */
+function CopyButton({
+  text,
+  label,
+  title,
+  className,
+}: {
+  text: string;
+  label: string;
+  title: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      // Prevent the card's onClick from opening the detail view
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Fallback: create a temporary input for environments without clipboard API
+        const input = document.createElement('input');
+        input.value = text;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    },
+    [text],
+  );
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      onKeyDown={e => {
+        // Prevent card activation when pressing Enter/Space on this button
+        e.stopPropagation();
+      }}
+      aria-label={label}
+      title={copied ? 'Copied!' : title}
+      className={className}
+    >
+      {copied ? '✓' : '📋'}
+    </button>
+  );
+}
+
 export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
   const { t } = useI18n();
   const color = STATE_COLORS[p.state];
@@ -210,6 +265,23 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Proposer address row — Issue #390 */}
+      <div className={styles.addressRow}>
+        <span
+          className={styles.address}
+          title={p.proposer}
+          aria-label={`Proposer address: ${p.proposer}`}
+        >
+          {maskAddress(p.proposer)}
+        </span>
+        <CopyButton
+          text={p.proposer}
+          label={`Copy proposer address ${p.proposer}`}
+          title="Copy proposer address"
+          className={styles.copyButton}
+        />
       </div>
 
       <p
