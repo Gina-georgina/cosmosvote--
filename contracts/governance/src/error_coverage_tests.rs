@@ -5,7 +5,7 @@
 //! that adding a new variant without a corresponding test is caught in review
 //! and by the CI coverage gate.
 
-use crate::errors::ContractError;
+use crate::types::ContractError;
 
 /// Helper: assert the numeric code of a `ContractError` variant.
 fn assert_code(err: ContractError, expected: u32) {
@@ -13,8 +13,8 @@ fn assert_code(err: ContractError, expected: u32) {
 }
 
 #[test]
-fn test_unauthorized_code() {
-    assert_code(ContractError::Unauthorized, 1);
+fn test_already_initialized_code() {
+    assert_code(ContractError::AlreadyInitialized, 1);
 }
 
 #[test]
@@ -23,116 +23,171 @@ fn test_not_initialized_code() {
 }
 
 #[test]
-fn test_already_initialized_code() {
-    assert_code(ContractError::AlreadyInitialized, 3);
-}
-
-#[test]
-fn test_invalid_proposal_code() {
-    assert_code(ContractError::InvalidProposal, 4);
-}
-
-#[test]
 fn test_proposal_not_found_code() {
-    assert_code(ContractError::ProposalNotFound, 5);
+    assert_code(ContractError::ProposalNotFound, 10);
 }
 
 #[test]
 fn test_proposal_not_active_code() {
-    assert_code(ContractError::ProposalNotActive, 6);
+    assert_code(ContractError::ProposalNotActive, 11);
 }
 
 #[test]
-fn test_proposal_expired_code() {
-    assert_code(ContractError::ProposalExpired, 7);
+fn test_proposal_not_passed_code() {
+    assert_code(ContractError::ProposalNotPassed, 12);
 }
 
 #[test]
-fn test_already_voted_code() {
-    assert_code(ContractError::AlreadyVoted, 8);
+fn test_invalid_title_code() {
+    assert_code(ContractError::InvalidTitle, 13);
 }
 
 #[test]
-fn test_voting_closed_code() {
-    assert_code(ContractError::VotingClosed, 9);
+fn test_invalid_description_code() {
+    assert_code(ContractError::InvalidDescription, 14);
 }
 
 #[test]
-fn test_quorum_not_met_code() {
-    assert_code(ContractError::QuorumNotMet, 10);
+fn test_invalid_quorum_code() {
+    assert_code(ContractError::InvalidQuorum, 15);
+}
+
+#[test]
+fn test_quorum_exceeds_supply_code() {
+    assert_code(ContractError::QuorumExceedsSupply, 16);
+}
+
+#[test]
+fn test_invalid_duration_range_code() {
+    assert_code(ContractError::InvalidDurationRange, 17);
 }
 
 #[test]
 fn test_insufficient_balance_code() {
-    assert_code(ContractError::InsufficientBalance, 11);
+    assert_code(ContractError::InsufficientBalance, 18);
 }
 
 #[test]
-fn test_invalid_amount_code() {
-    assert_code(ContractError::InvalidAmount, 12);
+fn test_proposal_cooldown_code() {
+    assert_code(ContractError::ProposalCooldown, 19);
 }
 
 #[test]
-fn test_invalid_threshold_code() {
-    assert_code(ContractError::InvalidThreshold, 13);
+fn test_quorum_below_floor_code() {
+    assert_code(ContractError::QuorumBelowFloor, 20);
 }
 
 #[test]
-fn test_invalid_duration_code() {
-    assert_code(ContractError::InvalidDuration, 14);
+fn test_proposals_still_active_code() {
+    assert_code(ContractError::ProposalsStillActive, 21);
 }
 
 #[test]
-fn test_invalid_input_code() {
-    assert_code(ContractError::InvalidInput, 15);
+fn test_voting_not_started_code() {
+    assert_code(ContractError::VotingNotStarted, 22);
 }
 
 #[test]
-fn test_overflow_code() {
-    assert_code(ContractError::Overflow, 16);
+fn test_voting_period_ended_code() {
+    assert_code(ContractError::VotingPeriodEnded, 23);
 }
 
 #[test]
-fn test_underflow_code() {
-    assert_code(ContractError::Underflow, 17);
+fn test_voting_still_open_code() {
+    assert_code(ContractError::VotingStillOpen, 24);
 }
 
 #[test]
-fn test_not_found_code() {
-    assert_code(ContractError::NotFound, 18);
+fn test_already_voted_code() {
+    assert_code(ContractError::AlreadyVoted, 25);
 }
 
 #[test]
-fn test_already_exists_code() {
-    assert_code(ContractError::AlreadyExists, 19);
+fn test_no_voting_power_code() {
+    assert_code(ContractError::NoVotingPower, 26);
 }
 
 #[test]
-fn test_paused_code() {
-    assert_code(ContractError::Paused, 20);
+fn test_admin_vote_restricted_code() {
+    assert_code(ContractError::AdminVoteRestricted, 27);
+}
+
+#[test]
+fn test_vote_not_found_code() {
+    assert_code(ContractError::VoteNotFound, 28);
+}
+
+#[test]
+fn test_vote_already_same_code() {
+    assert_code(ContractError::VoteAlreadySame, 29);
+}
+
+#[test]
+fn test_not_admin_code() {
+    assert_code(ContractError::NotAdmin, 30);
+}
+
+#[test]
+fn test_invalid_new_admin_code() {
+    assert_code(ContractError::InvalidNewAdmin, 31);
+}
+
+#[test]
+fn test_quorum_update_not_allowed_code() {
+    assert_code(ContractError::QuorumUpdateNotAllowed, 32);
+}
+
+#[test]
+fn test_no_pending_admin_code() {
+    assert_code(ContractError::NoPendingAdmin, 33);
+}
+
+#[test]
+fn test_not_pending_admin_code() {
+    assert_code(ContractError::NotPendingAdmin, 34);
+}
+
+#[test]
+fn test_not_proposer_code() {
+    assert_code(ContractError::NotProposer, 35);
+}
+
+#[test]
+fn test_votes_already_cast_code() {
+    assert_code(ContractError::VotesAlreadyCast, 36);
+}
+
+#[test]
+fn test_invalid_link_code() {
+    assert_code(ContractError::InvalidLink, 37);
+}
+
+#[test]
+fn test_invalid_choice_code() {
+    assert_code(ContractError::InvalidChoice, 38);
+}
+
+#[test]
+fn test_contract_paused_code() {
+    assert_code(ContractError::ContractPaused, 40);
 }
 
 #[test]
 fn test_not_paused_code() {
-    assert_code(ContractError::NotPaused, 21);
+    assert_code(ContractError::NotPaused, 41);
 }
 
 #[test]
-fn test_invalid_state_code() {
-    assert_code(ContractError::InvalidState, 22);
+fn test_arithmetic_overflow_code() {
+    assert_code(ContractError::ArithmeticOverflow, 50);
 }
 
 #[test]
-fn test_cross_contract_call_failed_code() {
-    assert_code(ContractError::CrossContractCallFailed, 23);
+fn test_execution_failed_code() {
+    assert_code(ContractError::ExecutionFailed, 60);
 }
 
 #[test]
-fn test_invalid_contract_address_code() {
-    assert_code(ContractError::InvalidContractAddress, 24);
-}
-
-#[test]
-fn test_unknown_code() {
-    assert_code(ContractError::Unknown, 25);
+fn test_invalid_treasury_amount_code() {
+    assert_code(ContractError::InvalidTreasuryAmount, 61);
 }

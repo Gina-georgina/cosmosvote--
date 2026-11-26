@@ -140,7 +140,7 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
           {/* Current / total display when no onPage handler */}
           {!onPage && (
             <span
-              aria-current="page"
+              aria-label={`Page ${page} of ${totalPages || 1}`}
               style={{ padding: '0.4rem 0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary, #555)' }}
             >
               {page} / {totalPages || 1}

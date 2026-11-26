@@ -12,6 +12,7 @@
 
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { visualizer } from 'rollup-plugin-visualizer';
 import { cspNoncePlugin } from './vite-plugin-csp-nonce';
 
 // ── CSP values ────────────────────────────────────────────────────────────────
@@ -81,6 +82,17 @@ export default defineConfig(({ mode }) => ({
     // nonce to dynamically injected <style> tags, so style-src can drop
     // 'unsafe-inline' in production.
     ...(mode === 'production' ? [cspNoncePlugin()] : []),
+    // Bundle analysis (Issue #396): `vite build --report` writes dist/stats.html
+    ...(process.argv.includes('--report')
+      ? [
+          visualizer({
+            filename: 'dist/stats.html',
+            gzipSize: true,
+            brotliSize: true,
+            template: 'treemap',
+          }),
+        ]
+      : []),
   ],
 
   server: {
@@ -93,6 +105,25 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Issue #396: keep the lazily-loaded tab components in their own chunks
+        // so the initial bundle stays small and the split is visible in the
+        // bundle analysis report.
+        manualChunks(id) {
+          if (id.includes('GovernanceAnalytics')) {
+            return 'governance-analytics';
+          }
+          if (id.includes('DelegationPanel')) {
+            return 'delegation-panel';
+          }
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 
   test: {
