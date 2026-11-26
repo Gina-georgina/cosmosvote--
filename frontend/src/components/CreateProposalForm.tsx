@@ -10,7 +10,8 @@ import {
 } from '@stellar/stellar-sdk';
 import { config, ACTIVE_NETWORK } from '../config';
 import { sanitizeWalletMessage } from '../utils/sanitizeWalletMessage';
-import { isValidHttpsUrl } from '../utils';
+import { useI18n } from '../i18n/I18nContext';
+import { useWalletStore } from '../store/walletStore';
 
 interface Props {
   walletAddress: string;
@@ -34,24 +35,60 @@ const INITIAL_FORM: FormState = {
   discussion_url: '',
 };
 
-const DISCUSSION_URL_ERROR = 'Discussion link must be a valid HTTPS URL';
+const DRAFT_NAMESPACE = 'cosmosvote:proposal_draft:';
 
-/** Returns the localStorage key scoped to the wallet address to prevent cross-user leakage. */
-function draftKey(walletAddress: string): string {
-  return `cosmosvote:proposal_draft:${walletAddress}`;
+/**
+ * Sanitise a wallet address so it can never escape the draft namespace.
+ * Only alphanumerics are kept; everything else is replaced with `_`.
+ */
+function sanitizeKeySegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 128);
 }
 
-function saveDraft(walletAddress: string, form: FormState): void {
+/**
+ * Deterministic, non-reversible hash of the wallet address used as the draft
+ * key segment. Uses SHA-256 via Web Crypto when available and falls back to a
+ * simple FNV-1a hash otherwise (e.g. insecure contexts / older runtimes).
+ */
+async function hashWalletAddress(walletAddress: string): Promise<string> {
+  const input = sanitizeKeySegment(walletAddress);
   try {
-    localStorage.setItem(draftKey(walletAddress), JSON.stringify(form));
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const data = new TextEncoder().encode(input);
+      const digest = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    }
+  } catch {
+    // Fall through to the non-crypto fallback below
+  }
+  // FNV-1a 32-bit fallback — not cryptographic, but still avoids storing the raw address
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv${hash.toString(16).padStart(8, '0')}`;
+}
+
+/** Returns the localStorage key scoped to a hash of the wallet address. */
+async function draftKey(walletAddress: string): Promise<string> {
+  const hash = await hashWalletAddress(walletAddress);
+  return `${DRAFT_NAMESPACE}${sanitizeKeySegment(hash)}`;
+}
+
+async function saveDraft(walletAddress: string, form: FormState): Promise<void> {
+  try {
+    localStorage.setItem(await draftKey(walletAddress), JSON.stringify(form));
   } catch {
     // Storage may be full or unavailable — silently ignore
   }
 }
 
-function loadDraft(walletAddress: string): FormState | null {
+async function loadDraft(walletAddress: string): Promise<FormState | null> {
   try {
-    const raw = localStorage.getItem(draftKey(walletAddress));
+    const raw = localStorage.getItem(await draftKey(walletAddress));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<FormState>;
     // Validate shape before returning
@@ -75,59 +112,89 @@ function loadDraft(walletAddress: string): FormState | null {
   }
 }
 
-function clearDraft(walletAddress: string): void {
+async function clearDraft(walletAddress: string): Promise<void> {
   try {
-    localStorage.removeItem(draftKey(walletAddress));
+    localStorage.removeItem(await draftKey(walletAddress));
   } catch {
     // ignore
   }
 }
 
 const DURATION_PRESETS = [
-  { label: '1 day', value: '86400' },
-  { label: '3 days', value: '259200' },
-  { label: '7 days', value: '604800' },
-  { label: '14 days', value: '1209600' },
-  { label: '30 days', value: '2592000' },
+  { labelKey: 'createProposal.durationPresets.oneDay', value: '86400' },
+  { labelKey: 'createProposal.durationPresets.threeDays', value: '259200' },
+  { labelKey: 'createProposal.durationPresets.sevenDays', value: '604800' },
+  { labelKey: 'createProposal.durationPresets.fourteenDays', value: '1209600' },
+  { labelKey: 'createProposal.durationPresets.thirtyDays', value: '2592000' },
 ];
 
-function fieldError(form: FormState): Partial<Record<keyof FormState, string>> {
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
+function fieldError(form: FormState, t: Translate): Partial<Record<keyof FormState, string>> {
   const errors: Partial<Record<keyof FormState, string>> = {};
-  if (!form.title.trim()) errors.title = 'Title is required.';
-  else if (form.title.length > 128) errors.title = 'Title must be ≤ 128 characters.';
-  if (!form.description.trim()) errors.description = 'Description is required.';
-  else if (form.description.length > 1024) errors.description = 'Description must be ≤ 1024 characters.';
+  if (!form.title.trim()) errors.title = t('createProposal.errors.titleRequired');
+  else if (form.title.length > 128) errors.title = t('createProposal.errors.titleTooLong');
+  if (!form.description.trim()) errors.description = t('createProposal.errors.descriptionRequired');
+  else if (form.description.length > 1024) errors.description = t('createProposal.errors.descriptionTooLong');
   const q = Number(form.quorum);
-  if (!form.quorum || isNaN(q) || q <= 0) errors.quorum = 'Quorum must be a positive number.';
+  if (!form.quorum || isNaN(q) || q <= 0) errors.quorum = t('createProposal.errors.quorumInvalid');
   const d = Number(form.duration);
   if (!form.duration || isNaN(d) || d < 60 || d > 2_592_000)
-    errors.duration = 'Duration must be between 60 seconds and 30 days.';
-  const link = form.discussion_url.trim();
-  if (link && !isValidHttpsUrl(link)) errors.discussion_url = DISCUSSION_URL_ERROR;
+    errors.duration = t('createProposal.errors.durationInvalid');
   return errors;
 }
 
 export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props) {
+  const { t } = useI18n();
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the wallet whose draft is currently persisted so we can clean it up
+  // when the wallet changes or disconnects.
+  const draftOwnerRef = useRef<string | null>(null);
 
-  // On mount: check for a saved draft and prompt the user to restore it
+  // On mount / wallet change: check for a saved draft and prompt the user to restore it
   useEffect(() => {
-    const draft = loadDraft(walletAddress);
-    if (draft && (draft.title || draft.description)) {
-      setShowRestorePrompt(true);
-    }
+    let cancelled = false;
+    draftOwnerRef.current = walletAddress;
+    loadDraft(walletAddress).then(draft => {
+      if (cancelled) return;
+      if (draft && (draft.title || draft.description)) {
+        setShowRestorePrompt(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [walletAddress]);
+
+  // Clear the previous wallet's draft whenever the wallet changes or disconnects.
+  useEffect(() => {
+    const unsubscribe = useWalletStore.subscribe((state, prevState) => {
+      const prevAddress = prevState?.address ?? null;
+      const nextAddress = state.address ?? null;
+      if (prevAddress && prevAddress !== nextAddress) {
+        // Wallet switched or disconnected — remove the outgoing wallet's draft
+        void clearDraft(prevAddress);
+        if (draftOwnerRef.current === prevAddress) {
+          draftOwnerRef.current = null;
+          setShowRestorePrompt(false);
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Auto-save after 1 second of inactivity whenever form changes
   const scheduleAutosave = useCallback(
     (nextForm: FormState) => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = setTimeout(() => saveDraft(walletAddress, nextForm), 1000);
+      autosaveTimerRef.current = setTimeout(() => {
+        void saveDraft(walletAddress, nextForm);
+      }, 1000);
     },
     [walletAddress],
   );
@@ -138,7 +205,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
     };
   }, []);
 
-  const errors = fieldError(form);
+  const errors = fieldError(form, t);
   const hasErrors = Object.keys(errors).length > 0;
 
   function handleChange(field: keyof FormState, value: string) {
@@ -154,13 +221,14 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
   }
 
   function handleRestoreDraft() {
-    const draft = loadDraft(walletAddress);
-    if (draft) setForm(draft);
-    setShowRestorePrompt(false);
+    void loadDraft(walletAddress).then(draft => {
+      if (draft) setForm(draft);
+      setShowRestorePrompt(false);
+    });
   }
 
   function handleDiscardDraft() {
-    clearDraft(walletAddress);
+    void clearDraft(walletAddress);
     setShowRestorePrompt(false);
   }
 
@@ -231,21 +299,17 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
       // Development / testnet path: ask for secret key via prompt.
       // Production path: integrate wallet extension SDK and replace this block.
       const secretKey = window.prompt(
-        sanitizeWalletMessage(
-          'Development mode: enter your Stellar secret key (S...) to sign this transaction. ' +
-          'In production, connect a wallet extension (Freighter) instead.',
-          512,
-        )
+        sanitizeWalletMessage(t('createProposal.prompts.secretKey'), 512)
       );
 
       if (!secretKey) {
-        setSubmitError('Transaction signing cancelled.');
+        setSubmitError(t('createProposal.errors.signingCancelled'));
         setSubmitting(false);
         return;
       }
 
       if (!secretKey.startsWith('S')) {
-        setSubmitError('Invalid secret key. It must start with "S".');
+        setSubmitError(t('createProposal.errors.invalidSecretKey'));
         setSubmitting(false);
         return;
       }
@@ -255,7 +319,11 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
 
       const sendResult = await server.sendTransaction(assembled);
       if (sendResult.status === 'ERROR') {
-        throw new Error(`Submission error: ${JSON.stringify(sendResult.errorResult)}`);
+        throw new Error(
+          t('createProposal.errors.submissionError', {
+            detail: JSON.stringify(sendResult.errorResult),
+          })
+        );
       }
 
       // Poll for confirmation
@@ -270,16 +338,16 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
             ? Number(status.returnValue.u64().toString())
             : 0;
           // Clear the draft on successful submission
-          clearDraft(walletAddress);
+          void clearDraft(walletAddress);
           onSuccess(returnedId);
           return;
         }
         if (status.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
-          throw new Error('Transaction failed on-chain.');
+          throw new Error(t('createProposal.errors.transactionFailed'));
         }
         attempts++;
       }
-      throw new Error('Transaction timed out waiting for confirmation.');
+      throw new Error(t('createProposal.errors.transactionTimeout'));
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -341,10 +409,10 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
       >
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b' }}>Create Proposal</h2>
+          <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b' }}>{t('createProposal.title')}</h2>
           <button
             onClick={onCancel}
-            aria-label="Close"
+            aria-label={t('common.close')}
             style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#6b7280', lineHeight: 1 }}
           >
             ×
@@ -369,7 +437,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
               gap: '0.5rem',
             }}
           >
-            <span>📝 You have a saved draft. Restore it?</span>
+            <span>{t('createProposal.draft.restorePrompt')}</span>
             <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
               <button
                 type="button"
@@ -384,7 +452,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                   cursor: 'pointer',
                 }}
               >
-                Restore
+                {t('createProposal.draft.restore')}
               </button>
               <button
                 type="button"
@@ -399,7 +467,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                   cursor: 'pointer',
                 }}
               >
-                Discard
+                {t('createProposal.draft.discard')}
               </button>
             </div>
           </div>
@@ -411,7 +479,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
             {/* Title */}
             <div>
               <label htmlFor="cp-title" style={labelStyle}>
-                Title <span style={{ color: '#dc2626' }}>*</span>
+                {t('createProposal.fields.title')} <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <input
                 id="cp-title"
@@ -419,7 +487,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 value={form.title}
                 onChange={e => handleChange('title', e.target.value)}
                 onBlur={() => handleBlur('title')}
-                placeholder="e.g. Increase validator rewards by 5%"
+                placeholder={t('createProposal.placeholders.title')}
                 maxLength={128}
                 style={inputStyle('title')}
                 aria-describedby={errors.title ? 'cp-title-error' : undefined}
@@ -437,14 +505,14 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
             {/* Description */}
             <div>
               <label htmlFor="cp-description" style={labelStyle}>
-                Description <span style={{ color: '#dc2626' }}>*</span>
+                {t('createProposal.fields.description')} <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <textarea
                 id="cp-description"
                 value={form.description}
                 onChange={e => handleChange('description', e.target.value)}
                 onBlur={() => handleBlur('description')}
-                placeholder="Describe the proposal in detail…"
+                placeholder={t('createProposal.placeholders.description')}
                 maxLength={1024}
                 rows={5}
                 style={{ ...inputStyle('description'), resize: 'vertical', fontFamily: 'inherit' }}
@@ -463,7 +531,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
             {/* Quorum */}
             <div>
               <label htmlFor="cp-quorum" style={labelStyle}>
-                Quorum (CVT) <span style={{ color: '#dc2626' }}>*</span>
+                {t('createProposal.fields.quorum')} <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <input
                 id="cp-quorum"
@@ -472,7 +540,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 value={form.quorum}
                 onChange={e => handleChange('quorum', e.target.value)}
                 onBlur={() => handleBlur('quorum')}
-                placeholder="e.g. 1000"
+                placeholder={t('createProposal.placeholders.quorum')}
                 style={inputStyle('quorum')}
                 aria-describedby={errors.quorum ? 'cp-quorum-error' : undefined}
                 aria-invalid={touched.quorum && !!errors.quorum}
@@ -481,14 +549,14 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 <span id="cp-quorum-error" style={errorStyle}>{errors.quorum}</span>
               )}
               <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Minimum total votes (Yes + No + Abstain) required for this proposal to be valid.
+                {t('createProposal.hints.quorum')}
               </div>
             </div>
 
             {/* Duration */}
             <div>
               <label htmlFor="cp-duration" style={labelStyle}>
-                Duration <span style={{ color: '#dc2626' }}>*</span>
+                {t('createProposal.fields.duration')} <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
                 {DURATION_PRESETS.map(p => (
@@ -507,7 +575,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                       cursor: 'pointer',
                     }}
                   >
-                    {p.label}
+                    {t(p.labelKey)}
                   </button>
                 ))}
               </div>
@@ -519,7 +587,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 value={form.duration}
                 onChange={e => handleChange('duration', e.target.value)}
                 onBlur={() => handleBlur('duration')}
-                placeholder="seconds (60 – 2592000)"
+                placeholder={t('createProposal.placeholders.duration')}
                 style={inputStyle('duration')}
                 aria-describedby={errors.duration ? 'cp-duration-error' : undefined}
                 aria-invalid={touched.duration && !!errors.duration}
@@ -529,7 +597,9 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
               )}
               {!errors.duration && form.duration && (
                 <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                  ≈ {(Number(form.duration) / 86400).toFixed(1)} days
+                  {t('createProposal.hints.durationApprox', {
+                    days: (Number(form.duration) / 86400).toFixed(1),
+                  })}
                 </div>
               )}
             </div>
@@ -570,7 +640,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
             }}
               role="alert"
             >
-              <strong>Error:</strong> {submitError}
+              <strong>{t('common.error')}:</strong> {submitError}
             </div>
           )}
 
@@ -591,7 +661,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 opacity: submitting ? 0.6 : 1,
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -608,7 +678,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                 minWidth: 140,
               }}
             >
-              {submitting ? '⏳ Submitting…' : 'Create Proposal'}
+              {submitting ? t('createProposal.submitting') : t('createProposal.submit')}
             </button>
           </div>
         </form>
