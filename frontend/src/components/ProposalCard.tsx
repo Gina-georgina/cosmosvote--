@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Proposal, ProposalState } from '../types';
 import { formatTokenAmount } from '../utils';
+import { useI18n } from '../i18n/I18nContext';
 import styles from './ProposalCard.module.css';
 
 const STATE_COLORS: Record<ProposalState, string> = {
@@ -34,7 +35,10 @@ function quorumPct(p: Proposal): number {
  * Returns a human-readable countdown string for the given Unix timestamp (seconds).
  * Returns null if the timestamp is in the past (i.e. voting has ended).
  */
-function getCountdown(endTimeSec: bigint): string | null {
+function getCountdown(
+  endTimeSec: bigint,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string | null {
   const nowSec = Math.floor(Date.now() / 1000);
   const diffSec = Number(endTimeSec) - nowSec;
   if (diffSec <= 0) return null;
@@ -44,10 +48,10 @@ function getCountdown(endTimeSec: bigint): string | null {
   const minutes = Math.floor((diffSec % 3600) / 60);
 
   const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (days === 0) parts.push(`${minutes}m`); // show minutes only when < 1 day
-  return parts.join(' ') + ' remaining';
+  if (days > 0) parts.push(t('proposal.countdown.days', { count: days }));
+  if (hours > 0) parts.push(t('proposal.countdown.hours', { count: hours }));
+  if (days === 0) parts.push(t('proposal.countdown.minutes', { count: minutes })); // show minutes only when < 1 day
+  return t('proposal.countdown.remaining', { time: parts.join(' ') });
 }
 
 /**
@@ -55,24 +59,25 @@ function getCountdown(endTimeSec: bigint): string | null {
  * Updates every 60 seconds and announces time remaining to screen readers via aria-live.
  */
 function CountdownTimer({ endTime }: { endTime: bigint }) {
-  const [countdown, setCountdown] = useState<string | null>(() => getCountdown(endTime));
+  const { t } = useI18n();
+  const [countdown, setCountdown] = useState<string | null>(() => getCountdown(endTime, t));
 
   useEffect(() => {
     // Refresh immediately on mount, then every 60 s
-    const tick = () => setCountdown(getCountdown(endTime));
+    const tick = () => setCountdown(getCountdown(endTime, t));
     tick();
     const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
-  }, [endTime]);
+  }, [endTime, t]);
 
   if (countdown === null) {
     return (
       <span
         aria-live="polite"
-        aria-label="Voting ended"
+        aria-label={t('proposal.votingEnded')}
         style={{ color: 'var(--color-state-rejected, #dc2626)', fontWeight: 600 }}
       >
-        Voting ended
+        {t('proposal.votingEnded')}
       </span>
     );
   }
@@ -80,8 +85,8 @@ function CountdownTimer({ endTime }: { endTime: bigint }) {
   return (
     <span
       aria-live="polite"
-      aria-label={`Time remaining: ${countdown}`}
-      title={`Voting ends ${formatDate(endTime)}`}
+      aria-label={t('proposal.timeRemaining', { time: countdown })}
+      title={t('proposal.votingEnds', { date: formatDate(endTime) })}
     >
       ⏱ {countdown}
     </span>
@@ -89,6 +94,7 @@ function CountdownTimer({ endTime }: { endTime: bigint }) {
 }
 
 export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
+  const { t } = useI18n();
   const color = STATE_COLORS[p.state];
   const pct = quorumPct(p);
 
@@ -139,7 +145,7 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`Proposal #${p.id}: ${p.title}`}
+      aria-label={t('proposal.cardAriaLabel', { id: String(p.id), title: p.title })}
       style={{
         border: `1px solid ${color}`,
         borderRadius: 8,
@@ -185,8 +191,8 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
                 // Prevent card activation when pressing Enter/Space on this button
                 e.stopPropagation();
               }}
-              aria-label={`Copy link to proposal #${p.id}`}
-              title="Copy proposal link"
+              aria-label={t('proposal.copyLinkAriaLabel', { id: String(p.id) })}
+              title={t('proposal.copyLinkTitle')}
               style={{
                 background: 'none',
                 border: '1px solid var(--border-color, #334155)',
@@ -223,9 +229,9 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
         {p.state === 'Active' ? (
           <CountdownTimer endTime={p.end_time} />
         ) : (
-          <>Ended {formatDate(p.end_time)}</>
+          <>{t('proposal.ended', { date: formatDate(p.end_time) })}</>
         )}
-        {' '}· Quorum {formatTokenAmount(p.quorum, decimals)}
+        {' '}· {t('proposal.quorum', { amount: formatTokenAmount(p.quorum, decimals) })}
       </div>
 
       {/* Quorum progress bar */}
@@ -241,7 +247,7 @@ export function ProposalCard({ proposal: p, decimals, onClick }: Props) {
         />
       </div>
       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
-        {pct}% of quorum · ✅ {formatTokenAmount(p.votes_yes, decimals)} · ❌{' '}
+        {t('proposal.quorumProgress', { pct })} · ✅ {formatTokenAmount(p.votes_yes, decimals)} · ❌{' '}
         {formatTokenAmount(p.votes_no, decimals)} · ⬜ {formatTokenAmount(p.votes_abstain, decimals)}
       </div>
     </article>
