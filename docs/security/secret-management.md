@@ -23,7 +23,49 @@ cp .env.example .env
 | `GOVERNANCE_CONTRACT_ID` | Deployed governance contract |
 | `TOKEN_CONTRACT_ID` | Deployed token contract |
 
+## Faucet Signing Key
+
+The faucet signing keypair must **not** be supplied through a plain environment variable. Environment variables are visible in `/proc`, process listings, logs, and crash dumps, which increases the exposure risk of the key.
+
+The faucet loads its key from exactly **one** of the following sources:
+
+| Source | Configuration | Notes |
+|---|---|---|
+| Secret file (recommended) | `FAUCET_SECRET_KEY_FILE=/run/secrets/faucet_secret_key` | Path to a file containing the Stellar secret key (`S...`). The file should be mounted read-only and readable only by the faucet process. |
+| AWS Secrets Manager | `FAUCET_SECRET_KEY_AWS_SECRET_ID=<secret-id>` | The secret value is fetched at startup using the ambient AWS credentials/role. |
+
+Exactly one source must be configured. If none is set, or more than one is set, the faucet fails fast at startup rather than guessing.
+
+### Deprecated env var fallback
+
+`FAUCET_SECRET_KEY` and `FAUCET_ADMIN_SECRET_KEY` are **deprecated**. They are only intended for local development convenience. When either is used, the faucet emits a deprecation warning at startup. Do not use them in staging or production — use `FAUCET_SECRET_KEY_FILE` or AWS Secrets Manager instead.
+
+### Logging
+
+The faucet key is redacted from all log output, including at `DEBUG` level. Never log, `echo`, or otherwise print the key or the contents of the secret file. Avoid dumping the full environment or process arguments in debugging output.
+
+### Docker Compose example
+
+Mount the secret file into the container and point the faucet at it:
+
+```yaml
+services:
+  faucet:
+    image: stellar-faucet:latest
+    environment:
+      FAUCET_SECRET_KEY_FILE: /run/secrets/faucet_secret_key
+    secrets:
+      - faucet_secret_key
+
+secrets:
+  faucet_secret_key:
+    file: ./secrets/faucet_secret_key   # git-ignored, never committed
+```
+
+The `./secrets/` directory must be listed in `.gitignore`. The key file must never be committed to the repository or echoed in shell commands, CI logs, or documentation.
+
 ## CI / GitHub Actions
+=======
 
 Store all secrets in **GitHub Secrets** (Settings → Secrets and variables → Actions), not in workflow files or committed configs.
 

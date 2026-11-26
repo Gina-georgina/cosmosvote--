@@ -147,17 +147,21 @@ Soroban runtime.
 
 **Events**
 
-On success, emits one event per disbursement:
+On success, emits one `Disbursed` event per disbursement:
 
 | Topic | Data | Description |
 |-------|------|-------------|
-| `("disburse",)` | `(recipient: Address, amount: i128)` | Funds have been sent |
+| `("treasury", "disbursed")` | `(recipient: Address, amount: i128, asset: Asset, proposal_id: u64)` | Funds have been sent |
+
+The event is defined following the existing event naming conventions and lets
+governance participants verify disbursements from event logs alone.
 
 **Errors / Panics**
 
 | Condition | Behaviour |
 |-----------|-----------|
 | Caller is not the stored governance address | Runtime auth failure (transaction rejected) |
+| `action.recipient` is the zero address | Panics with `InvalidRecipient` |
 | Treasury has insufficient balance | Token contract panics / returns an error |
 | `amount` ≤ 0 | Token contract may reject the transfer (depends on implementation) |
 
@@ -170,6 +174,41 @@ treasury.disburse(&TreasuryAction {
     amount:    1_000_000i128,           // 100 VOTE (7 decimals)
     asset:     Asset::Token(vote_token_id),
 });
+```
+
+---
+
+### `balance`
+
+```rust
+pub fn balance(env: Env, asset: Asset) -> i128
+```
+
+Returns the treasury's current balance for the given asset. Use this instead of
+simulating a raw storage read to display the DAO treasury balance.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `env` | `Env` | Soroban environment (injected by the runtime) |
+| `asset` | `Asset` | Which asset to query (`Asset::Native` or `Asset::Token(addr)`) |
+
+**Returns:** The balance as `i128`, in the asset's smallest unit (stroops for
+XLM, raw units for SEP-41 tokens).
+
+**Asset handling**
+
+| `asset` | Behaviour |
+|---------|-----------|
+| `Asset::Native` | Returns the native XLM balance of the treasury via the Stellar asset contract |
+| `Asset::Token(addr)` | Returns the SEP-41 token balance of the treasury at `addr` |
+
+**Example**
+
+```rust
+let xlm_balance = treasury.balance(&Asset::Native);
+let vote_balance = treasury.balance(&Asset::Token(vote_token_id));
 ```
 
 ---
@@ -215,6 +254,8 @@ The table below lists all observable failure conditions.
 |-----------|-----------------|---------------------|
 | Double initialization | `initialize` | `panic!("already initialized")` |
 | Unauthorized `disburse` caller | `disburse` | Soroban auth failure (no explicit message) |
+| Zero-address recipient | `disburse` | `InvalidRecipient` |
+| Zero-address recipient in treasury action | `create_proposal` (governance) | `InvalidRecipient` |
 | Insufficient treasury balance | `disburse` | Propagated from token contract |
 | `governance()` before `initialize` | `governance` | Soroban `unwrap()` panic |
 
@@ -231,8 +272,8 @@ The typical end-to-end flow for a treasury disbursement:
    `governance.execute(proposal_id)`.
 4. The governance contract internally calls `treasury.disburse(action)` with
    its own auth, sending funds to the recipient.
-5. A `("disburse", ...)` event is emitted and can be indexed by off-chain
-   services.
+5. A `("treasury", "disbursed")` event is emitted and can be indexed by
+   off-chain services.
 
 See [docs/api/governance.md](./governance.md) for the `execute` and
 `create_proposal` function signatures, and the `ExecutionPayload` type that

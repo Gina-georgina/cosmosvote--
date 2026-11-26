@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { ACTIVE_NETWORK } from '../config';
+import { useI18n } from '../i18n/I18nContext';
 import { formatTokenAmount, maskAddress } from '../utils';
 import styles from './Header.module.css';
 
@@ -34,9 +35,9 @@ interface HeaderProps {
 
 /** Navigation links rendered inside the mobile menu. */
 const NAV_LINKS = [
-  { label: 'Proposals', href: '#proposals' },
-  { label: 'Dashboard', href: '#dashboard' },
-  { label: 'Docs', href: 'https://github.com/sophiawilliamz/cosmosvote', target: '_blank' },
+  { labelKey: 'header.nav.proposals', href: '#proposals' },
+  { labelKey: 'header.nav.dashboard', href: '#dashboard' },
+  { labelKey: 'header.nav.docs', href: 'https://github.com/sophiawilliamz/cosmosvote', target: '_blank' },
 ] as const;
 
 export function Header({
@@ -47,8 +48,10 @@ export function Header({
   onDisconnect,
   theme,
   onToggleTheme,
-  connectLabel = 'Connect Wallet',
+  connectLabel,
 }: HeaderProps) {
+  const { t } = useI18n();
+  const resolvedConnectLabel = connectLabel ?? t('header.connectWallet');
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFullAddress, setShowFullAddress] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -98,22 +101,22 @@ export function Header({
       <div className={styles.brand}>
         <h1 className={styles.title}>🌌 CosmosVote</h1>
         <span className={styles.subtitle}>
-          On-chain governance · {ACTIVE_NETWORK}
+          {t('header.subtitle', { network: ACTIVE_NETWORK })}
         </span>
       </div>
 
       {/* ── Desktop nav (hidden on mobile) ── */}
-      <nav className={styles.desktopNav} aria-label="Main navigation">
+      <nav className={styles.desktopNav} aria-label={t('header.mainNavigation')}>
         <ul className={styles.navList}>
           {NAV_LINKS.map((link) => (
-            <li key={link.label}>
+            <li key={link.labelKey}>
               <a
                 href={link.href}
                 className={styles.navLink}
                 target={'target' in link ? link.target : undefined}
                 rel={'target' in link ? 'noopener noreferrer' : undefined}
               >
-                {link.label}
+                {t(link.labelKey)}
               </a>
             </li>
           ))}
@@ -126,7 +129,11 @@ export function Header({
         <button
           onClick={onToggleTheme}
           className={styles.iconBtn}
-          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          aria-label={
+            theme === 'dark'
+              ? t('header.switchToLightMode')
+              : t('header.switchToDarkMode')
+          }
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
@@ -136,9 +143,13 @@ export function Header({
           <div className={styles.walletInfo}>
             <button
               className={styles.addressBtn}
-              title={showFullAddress ? 'Click to hide' : walletAddress}
+              title={showFullAddress ? t('header.clickToHide') : walletAddress}
               onClick={() => setShowFullAddress((s) => !s)}
-              aria-label={showFullAddress ? 'Hide full address' : 'Show full address'}
+              aria-label={
+                showFullAddress
+                  ? t('header.hideFullAddress')
+                  : t('header.showFullAddress')
+              }
             >
               {showFullAddress ? walletAddress : maskAddress(walletAddress)}
             </button>
@@ -150,14 +161,14 @@ export function Header({
             <button
               onClick={onDisconnect}
               className={styles.disconnectBtn}
-              aria-label="Disconnect wallet"
+              aria-label={t('header.disconnectWallet')}
             >
-              Disconnect
+              {t('header.disconnect')}
             </button>
           </div>
         ) : (
           <button onClick={onConnect} className={styles.connectBtn}>
-            {connectLabel}
+            {resolvedConnectLabel}
           </button>
         )}
 
@@ -166,7 +177,7 @@ export function Header({
           ref={hamburgerRef}
           className={styles.hamburger}
           onClick={() => setMenuOpen((o) => !o)}
-          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-label={menuOpen ? t('header.closeMenu') : t('header.openMenu')}
           aria-expanded={menuOpen}
           aria-controls="mobile-menu"
         >
@@ -183,10 +194,10 @@ export function Header({
         className={`${styles.mobileMenu} ${menuOpen ? styles.mobileMenuOpen : ''}`}
         aria-hidden={!menuOpen}
       >
-        <nav aria-label="Mobile navigation">
+        <nav aria-label={t('header.mobileNavigation')}>
           <ul className={styles.mobileNavList}>
             {NAV_LINKS.map((link) => (
-              <li key={link.label}>
+              <li key={link.labelKey}>
                 <a
                   href={link.href}
                   className={styles.mobileNavLink}
@@ -194,7 +205,7 @@ export function Header({
                   rel={'target' in link ? 'noopener noreferrer' : undefined}
                   onClick={() => setMenuOpen(false)}
                 >
-                  {link.label}
+                  {t(link.labelKey)}
                 </a>
               </li>
             ))}
@@ -217,7 +228,7 @@ export function Header({
                 onClick={() => { onDisconnect(); setMenuOpen(false); }}
                 className={styles.disconnectBtn}
               >
-                Disconnect
+                {t('header.disconnect')}
               </button>
             </>
           ) : (
@@ -225,7 +236,7 @@ export function Header({
               onClick={() => { onConnect(); setMenuOpen(false); }}
               className={styles.connectBtn}
             >
-              {connectLabel}
+              {resolvedConnectLabel}
             </button>
           )}
         </div>

@@ -22,33 +22,53 @@ export function usePolling(fn: () => Promise<void>, { interval = 15_000, enabled
 
   const backoffRef = useRef(1);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(false);
 
-  useEffect(() => {
-    if (!enabled) return;
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
 
-    backoffRef.current = 1;
-    let cancelled = false;
-
-    const run = async () => {
+  const schedule = useCallback((delay: number) => {
+    if (cancelledRef.current) return;
+    timerRef.current = setTimeout(async () => {
+      if (cancelledRef.current) return;
       try {
         await fnRef.current();
         backoffRef.current = 1;
       } catch {
         backoffRef.current = Math.min(backoffRef.current * 2, 4);
       }
-      if (cancelled) return;
-      timerRef.current = setTimeout(run, interval * backoffRef.current);
-    };
+      if (cancelledRef.current) return;
+      schedule(interval * backoffRef.current);
+    }, delay);
+  }, [interval]);
 
-    // Fire immediately, then schedule subsequent polls.
-    run();
+  useEffect(() => {
+    // Skip the immediate call and scheduling entirely when disabled.
+    if (!enabled) return;
+
+    cancelledRef.current = false;
+    backoffRef.current = 1;
+
+    // Fire immediately, then schedule
+    (async () => {
+      try {
+        await fnRef.current();
+      } catch {
+        backoffRef.current = 2;
+      }
+      if (cancelledRef.current) return;
+      schedule(interval * backoffRef.current);
+    })();
 
     return () => {
-      cancelled = true;
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      // Mark cancelled so any in-flight async continuation won't reschedule,
+      // then clear any pending timeout.
+      cancelledRef.current = true;
+      clearTimer();
     };
-  }, [enabled, interval]);
+  }, [enabled, interval, schedule, clearTimer]);
 }

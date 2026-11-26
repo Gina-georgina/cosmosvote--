@@ -2,18 +2,62 @@ export function maskAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
-export function formatTokenAmount(amount: bigint, decimals: number): string {
-  const str = String(amount);
-  if (decimals === 0) return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  
-  const padded = str.padStart(decimals + 1, '0');
-  const intPart = padded.slice(0, -decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  let fracPart = padded.slice(-decimals);
-  
-  // We can just keep 2 decimals for simplicity or trim trailing zeros
-  fracPart = fracPart.slice(0, 2).padEnd(2, '0');
-  
-  return `${intPart}.${fracPart} CVT`;
+/**
+ * Default token symbol used when formatting token amounts.
+ */
+export const DEFAULT_TOKEN_SYMBOL = 'CVT';
+
+/**
+ * Formats a raw integer token amount into a human-readable string with the
+ * token symbol appended (e.g. `1.00 CVT`).
+ *
+ * @param amount The raw amount in the token's smallest unit.
+ * @param decimals The number of decimals the token uses.
+ * @param symbol Optional token symbol; defaults to `DEFAULT_TOKEN_SYMBOL`.
+ * @returns A human-readable amount string, e.g. `1.00 CVT`.
+ */
+export function formatTokenAmount(
+  amount: bigint,
+  decimals: number,
+  symbol: string = DEFAULT_TOKEN_SYMBOL,
+): string {
+  const negative = amount < 0n;
+  const str = String(negative ? -amount : amount);
+
+  let formatted: string;
+  if (decimals <= 0) {
+    formatted = str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  } else {
+    const padded = str.padStart(decimals + 1, '0');
+    const intPart = padded
+      .slice(0, -decimals)
+      .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const fracPart = padded.slice(-decimals).slice(0, 2).padEnd(2, '0');
+    formatted = `${intPart}.${fracPart}`;
+  }
+
+  return `${negative ? '-' : ''}${formatted} ${symbol}`;
+}
+
+/**
+ * Returns true only when `value` parses as a URL whose protocol is exactly
+ * `https:`. Used to validate optional link fields (e.g. proposal discussion
+ * URLs) before submission.
+ *
+ * @param value The raw string to validate.
+ * @returns Whether the value is a valid HTTPS URL.
+ */
+export function isValidHttpsUrl(value: string): boolean {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /**

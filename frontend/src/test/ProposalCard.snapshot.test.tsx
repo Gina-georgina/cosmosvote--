@@ -37,4 +37,19 @@ describe('ProposalCard snapshots', () => {
     const { container } = render(<ProposalCard proposal={{ ...base, state: 'Executed' }} decimals={0} onClick={vi.fn()} />);
     expect(container).toMatchSnapshot();
   });
+
+  it('sets title and aria-label with the full proposer address on the masked address', () => {
+    const { getByTitle, getByLabelText } = render(
+      <ProposalCard proposal={base} decimals={0} onClick={vi.fn()} />,
+    );
+    const addressEl = getByTitle(base.proposer);
+    expect(addressEl).toHaveAttribute('title', base.proposer);
+    expect(addressEl).toHaveAttribute('aria-label', base.proposer);
+    expect(getByLabelText(base.proposer)).toBe(addressEl);
+  });
+
+  it('renders a copy-to-clipboard button next to the address', () => {
+    const { getByRole } = render(<ProposalCard proposal={base} decimals={0} onClick={vi.fn()} />);
+    expect(getByRole('button', { name: /copy/i })).toBeInTheDocument();
+  });
 });

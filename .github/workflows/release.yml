@@ -27,6 +27,13 @@ jobs:
       - name: Build WASM binaries
         run: cargo build --release --target wasm32-unknown-unknown
 
+      - name: Capture build metadata
+        id: build_meta
+        run: |
+          RUSTC_VERSION=$(rustc --version)
+          echo "rustc_version=$RUSTC_VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Prepare release artifacts
         run: |
           mkdir -p release
@@ -34,7 +41,11 @@ jobs:
           cp target/wasm32-unknown-unknown/release/cosmosvote_token.wasm release/
           cd release
           sha256sum *.wasm > checksums.sha256
+          for wasm in *.wasm; do
+            sha256sum "$wasm" > "$wasm.sha256"
+          done
           cat checksums.sha256
+          cat *.wasm.sha256
 
       - name: Extract version from Cargo.toml
         id: cargo_version
@@ -65,10 +76,20 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           name: Release v${{ steps.cargo_version.outputs.version }}
-          body: ${{ steps.changelog.outputs.notes }}
+          body: |
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+
+            ### Build Metadata
+
+            - **Rust version:** `${{ steps.build_meta.outputs.rustc_version }}`
+            - **Commit SHA:** `${{ steps.build_meta.outputs.commit_sha }}`
           files: |
             release/cosmosvote_governance.wasm
+            release/cosmosvote_governance.wasm.sha256
             release/cosmosvote_token.wasm
+            release/cosmosvote_token.wasm.sha256
             release/checksums.sha256
           draft: false
           prerelease: false

@@ -8,6 +8,7 @@ interface WalletState {
   walletAddress: string | null;
   walletName: WalletName | null;
   tokenBalance: bigint | null;
+  balanceLoading: boolean;
   showModal: boolean;
 
   // Actions
@@ -16,6 +17,8 @@ interface WalletState {
   connect: (wallet: WalletName) => Promise<void>;
   disconnect: () => void;
   refreshBalance: () => Promise<void>;
+  startBalancePolling: () => void;
+  stopBalancePolling: () => void;
   /**
    * Sign a Stellar transaction XDR string using the connected wallet.
    * Returns the signed XDR, or throws if no wallet is connected or the
@@ -24,10 +27,15 @@ interface WalletState {
   signTransaction: (xdr: string, networkPassphrase: string) => Promise<string>;
 }
 
+const BALANCE_POLL_INTERVAL_MS = 60_000;
+
+let balancePollTimer: ReturnType<typeof setInterval> | null = null;
+
 export const useWalletStore = create<WalletState>((set, get) => ({
   walletAddress: sessionStorage.getItem('cosmosvote-wallet-address'),
   walletName: sessionStorage.getItem('cosmosvote-wallet-name') as WalletName | null,
   tokenBalance: null,
+  balanceLoading: false,
   showModal: false,
 
   openModal: () => set({ showModal: true }),
@@ -60,25 +68,47 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     sessionStorage.setItem('cosmosvote-wallet-name', wallet);
     set({ walletAddress: address, walletName: wallet, showModal: false });
 
-    fetchTokenBalance(address)
-      .then(tokenBalance => set({ tokenBalance }))
-      .catch(() => set({ tokenBalance: null }));
+    await get().refreshBalance();
+    get().startBalancePolling();
   },
 
   disconnect: () => {
+    get().stopBalancePolling();
     sessionStorage.removeItem('cosmosvote-wallet-address');
     sessionStorage.removeItem('cosmosvote-wallet-name');
-    set({ walletAddress: null, walletName: null, tokenBalance: null });
+    set({ walletAddress: null, walletName: null, tokenBalance: null, balanceLoading: false });
   },
 
   refreshBalance: async () => {
     const { walletAddress } = get();
     if (!walletAddress) return;
+    set({ balanceLoading: true });
     try {
       const tokenBalance = await fetchTokenBalance(walletAddress);
       set({ tokenBalance });
     } catch {
       set({ tokenBalance: null });
+    } finally {
+      set({ balanceLoading: false });
+    }
+  },
+
+  startBalancePolling: () => {
+    if (balancePollTimer !== null) return;
+    if (!get().walletAddress) return;
+    balancePollTimer = setInterval(() => {
+      if (!get().walletAddress) {
+        get().stopBalancePolling();
+        return;
+      }
+      void get().refreshBalance();
+    }, BALANCE_POLL_INTERVAL_MS);
+  },
+
+  stopBalancePolling: () => {
+    if (balancePollTimer !== null) {
+      clearInterval(balancePollTimer);
+      balancePollTimer = null;
     }
   },
 
@@ -114,3 +144,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     throw new Error('No supported wallet connected');
   },
 }));
+
+// Resume polling when the store rehydrates from sessionStorage with an address.
+if (useWalletStore.getState().walletAddress) {
+  useWalletStore.getState().startBalancePolling();
+}

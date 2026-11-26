@@ -71,3 +71,51 @@ body {
   font-family: system-ui, sans-serif;
   transition: background 0.2s, color 0.2s;
 }
+
+/* Global keyboard focus indicator */
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Ensure interactive elements always show a visible focus ring */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Suppress the focus ring only for mouse interactions */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Dark theme: use a lighter ring for sufficient contrast */
+[data-theme="dark"] :focus-visible,
+[data-theme="dark"] a:focus-visible,
+[data-theme="dark"] button:focus-visible,
+[data-theme="dark"] input:focus-visible,
+[data-theme="dark"] select:focus-visible,
+[data-theme="dark"] textarea:focus-visible,
+[data-theme="dark"] summary:focus-visible,
+[data-theme="dark"] [tabindex]:focus-visible {
+  outline-color: #60a5fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :focus-visible,
+  :root:not([data-theme="light"]) a:focus-visible,
+  :root:not([data-theme="light"]) button:focus-visible,
+  :root:not([data-theme="light"]) input:focus-visible,
+  :root:not([data-theme="light"]) select:focus-visible,
+  :root:not([data-theme="light"]) textarea:focus-visible,
+  :root:not([data-theme="light"]) summary:focus-visible,
+  :root:not([data-theme="light"]) [tabindex]:focus-visible {
+    outline-color: #60a5fa;
+  }
+}

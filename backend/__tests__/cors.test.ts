@@ -43,6 +43,39 @@ describe('cors utility', () => {
     expect(isOriginAllowed('https://evil.example.com')).toBe(false);
   });
 
+  it('rejects a prefix-spoofed origin', () => {
+    const { isOriginAllowed } = loadCors('https://cosmosvote.dev');
+    expect(isOriginAllowed('https://cosmosvote.dev')).toBe(true);
+    expect(isOriginAllowed('https://cosmosvote.dev.evil.com')).toBe(false);
+    expect(isOriginAllowed('https://cosmosvote.dev.evil.com/path')).toBe(false);
+  });
+
+  it('rejects a wildcard origin in production mode', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const { isOriginAllowed } = loadCors('*');
+      expect(isOriginAllowed('https://evil.example.com')).toBe(false);
+      expect(isOriginAllowed('*')).toBe(false);
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+
+  it('is case-sensitive when matching origins', () => {
+    const { isOriginAllowed } = loadCors('https://app.example.com');
+    expect(isOriginAllowed('https://APP.example.com')).toBe(false);
+  });
+
+  it('rejects origins with a trailing slash mismatch', () => {
+    const { isOriginAllowed } = loadCors('https://app.example.com');
+    expect(isOriginAllowed('https://app.example.com/')).toBe(false);
+  });
+
   it('rejects undefined origin', () => {
     const { isOriginAllowed } = loadCors('https://app.example.com');
     expect(isOriginAllowed(undefined)).toBe(false);
