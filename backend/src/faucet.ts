@@ -17,6 +17,7 @@ import Database from 'better-sqlite3';
 import { logger } from './logger';
 
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_IP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
 
@@ -134,6 +135,8 @@ export interface FaucetConfig {
   rpcUrl: string;
   amount: bigint;
   tokenDecimals: number;
+  /** Per-IP claim cooldown window in milliseconds (default: 24 h). */
+  ipCooldownMs?: number;
 }
 
 export class FaucetMintError extends Error {
@@ -218,6 +221,7 @@ export function createFaucetServer(
   config: FaucetConfig,
   store = new FaucetClaimStore(config.databasePath),
   mint: (config: FaucetConfig, recipient: string) => Promise<string> = mintTestTokens,
+  ipLimiter = new IpRateLimiter(config.ipCooldownMs ?? DEFAULT_IP_COOLDOWN_MS),
 ): Server {
   // Seed the runtime allowlist with the faucet's own origin so the single-origin
   // FAUCET_ALLOWED_ORIGIN path still works alongside the ALLOWED_ORIGINS list.
@@ -322,6 +326,8 @@ export function createFaucetServer(
       return;
     }
 
+    ipLimiter.record(hashIp(clientIp), now);
+
     try {
       const transactionHash = await mint(config, address);
       logger.info({
@@ -391,6 +397,10 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   if (!['https:', ...(env.NODE_ENV === 'production' ? [] : ['http:'])].includes(rpcUrl.protocol)) {
     throw new Error('FAUCET_RPC_URL must use HTTPS in production.');
   }
+  const ipCooldownMs = Number(env.FAUCET_IP_COOLDOWN_MS ?? String(DEFAULT_IP_COOLDOWN_MS));
+  if (!Number.isFinite(ipCooldownMs) || ipCooldownMs < 0) {
+    throw new Error('FAUCET_IP_COOLDOWN_MS must be a non-negative number of milliseconds.');
+  }
 
   return {
     allowedOrigin,
@@ -400,5 +410,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
     rpcUrl: rpcUrl.toString(),
     amount,
     tokenDecimals,
+    ipCooldownMs,
   };
 }
