@@ -14,6 +14,7 @@
 
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { IncomingMessage, ServerResponse } from 'http';
+import { sendProblem, PROBLEM_TYPES } from './problemJson';
 
 // ── Registry ────────────────────────────────────────────────────────────────
 
@@ -76,8 +77,13 @@ export async function metricsHandler(
   res: ServerResponse
 ): Promise<void> {
   if (req.method !== 'GET') {
-    res.writeHead(405, { Allow: 'GET' });
-    res.end('Method Not Allowed');
+    res.setHeader('Allow', 'GET');
+    sendProblem(res, req, {
+      type: PROBLEM_TYPES.methodNotAllowed,
+      title: 'Method Not Allowed',
+      status: 405,
+      detail: 'Only GET is supported on /metrics.',
+    });
     return;
   }
 
