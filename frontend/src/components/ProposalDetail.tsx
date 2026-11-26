@@ -212,6 +212,43 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
     };
   }, [triggerRef]);
 
+  // Clear any pending "Copied!" reset timer on unmount
+  useEffect(() => {
+    return () => {
+      if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
+    };
+  }, []);
+
+  // Copy the canonical deep-link URL for this proposal to the clipboard.
+  const handleShare = useCallback(async () => {
+    const url = `${window.location.origin}/?proposal=${String(p.id)}`;
+    const showFeedback = (state: 'copied' | 'error') => {
+      setShareState(state);
+      if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
+      shareResetTimer.current = setTimeout(() => setShareState('idle'), 2_000);
+    };
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        showFeedback('copied');
+      } else {
+        // Fallback for browsers without the Clipboard API
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showFeedback(ok ? 'copied' : 'error');
+      }
+    } catch {
+      showFeedback('error');
+    }
+  }, [p.id]);
+
   // Move focus to the confirmation message after a successful vote
   useEffect(() => {
     if (voteConfirmation) {
@@ -320,6 +357,8 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
           t('proposalDetail.voteSubmitted', { vote: voteLabel, id: String(p.id) }),
         ),
       );
+      // Refresh the header token balance so it reflects the post-vote state.
+      void refreshBalance();
     } catch (e) {
       setVoteError(
         t('proposalDetail.voteFailed', {

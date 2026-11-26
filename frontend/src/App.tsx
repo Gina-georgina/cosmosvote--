@@ -33,12 +33,21 @@ const ADMIN_ADDRESS = import.meta.env.VITE_ADMIN_ADDRESS ?? null;
 
 type AppTab = 'proposals' | 'dashboard' | 'treasury';
 
+// Parse a proposal id from `/?proposal=<id>` or `/proposals/<id>` (Issue #394)
+function parseProposalIdFromUrl(): string | null {
+  const sp = new URLSearchParams(window.location.search);
+  const fromQuery = sp.get('proposal');
+  if (fromQuery) return fromQuery;
+  const match = window.location.pathname.match(/^\/proposals\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export default function App() {
   const { t } = useI18n();
 
   // Wallet state comes exclusively from WalletContext (backed by Zustand walletStore).
   // No local wallet state duplicates are created here.
-  const { walletAddress, tokenBalance, showModal, openModal, disconnect } = useWallet();
+  const { walletAddress, tokenBalance, showModal, openModal, disconnect, refreshBalance } = useWallet();
 
   // votedMap from proposalStore (keyed by string id); convert to bigint keys for analytics
   const storeVotedMap = useProposalStore(s => s.votedMap);
@@ -85,6 +94,8 @@ export default function App() {
       setSearch(sp.get('q') ?? '');
       setStateFilter((sp.get('state') as ProposalState | 'All') ?? 'All');
       setPage(Number(sp.get('page') ?? 1) || 1);
+      // Deep-link: browser back closes the modal / restores the list
+      setProposalIdParam(parseProposalIdFromUrl());
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -92,6 +103,9 @@ export default function App() {
   // ────────────────────────────────────────────────────────────────────────
 
   const [selected, setSelected] = useState<Proposal | null>(null);
+  // Deep-link (Issue #394): id parsed from URL, plus not-found flag
+  const [proposalIdParam, setProposalIdParam] = useState<string | null>(() => parseProposalIdFromUrl());
+  const [proposalNotFound, setProposalNotFound] = useState(false);
   const [rpcWarning, setRpcWarning] = useState<string | null>(null);
   const [showFullAddress, setShowFullAddress] = useState(false);
   // Tab navigation — proposals / dashboard / treasury
@@ -137,17 +151,47 @@ export default function App() {
     });
   }, []);
 
-  // Issue #30: auto-open a proposal when ?proposal=<id> is in the URL
+  // Issue #394: open the detail modal for the deep-linked proposal id.
+  // Supports both `/?proposal=<id>` and `/proposals/<id>`. Invalid or unknown
+  // ids render a not-found message instead of crashing.
   useEffect(() => {
-    if (loading || proposals.length === 0) return;
-    const params = new URLSearchParams(window.location.search);
-    const proposalParam = params.get('proposal');
-    if (!proposalParam) return;
-    const match = proposals.find(pr => String(pr.id) === proposalParam);
-    if (match) {
-      setSelected(match);
+    if (loading) return;
+    if (proposalIdParam === null) {
+      setProposalNotFound(false);
+      return;
     }
-  }, [loading, proposals]);
+    const match = proposals.find(pr => String(pr.id) === proposalIdParam);
+    if (match) {
+      setProposalNotFound(false);
+      setSelected(match);
+    } else {
+      setSelected(null);
+      setProposalNotFound(true);
+    }
+  }, [loading, proposals, proposalIdParam]);
+
+  // Open the detail modal and push a deep-link history entry (Issue #394)
+  const openProposal = (proposal: Proposal) => {
+    setProposalNotFound(false);
+    setSelected(proposal);
+    setProposalIdParam(String(proposal.id));
+    const sp = new URLSearchParams(window.location.search);
+    sp.set('proposal', String(proposal.id));
+    window.history.pushState(null, '', `?${sp.toString()}`);
+  };
+
+  // Close the detail modal and remove the deep-link param from history (Issue #394)
+  const closeProposal = () => {
+    setSelected(null);
+    setProposalNotFound(false);
+    setProposalIdParam(null);
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete('proposal');
+    const qs = sp.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    // Restore scroll position to where it was when the detail was opened
+    window.scrollTo({ top: scrollPositionRef.current });
+  };
 
   // Filter computation memoised on the inputs that actually affect the result
   // set (Issue #389). Unrelated state changes (polling updates, theme, etc.)
@@ -190,6 +234,8 @@ export default function App() {
   const handleProposalCreated = (id: number) => {
     setAnnouncement(t('app.announce.proposalCreated', { id }));
     fetchAllProposals().then(setProposals).catch(() => {});
+    // Issue #391: refresh token balance immediately after proposal submission
+    refreshBalance().catch(() => {});
   };
 
   // Simulate loading state transitions for dashboard and treasury tabs.
@@ -432,7 +478,7 @@ export default function App() {
                   triggerRef.current = e?.currentTarget as HTMLElement ?? null;
                   // Preserve scroll position so it can be restored when detail closes
                   scrollPositionRef.current = window.scrollY;
-                  setSelected(p);
+                  openProposal(p);
                 }}
               />
             ))}
@@ -488,17 +534,34 @@ export default function App() {
 
       {/* ── Modals ── */}
 
+      {proposalNotFound && !selected && (
+        <div
+          role="alert"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
+        >
+          <div style={{ background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #0f172a)', borderRadius: 10, padding: '1.5rem', maxWidth: 420, width: '100%', textAlign: 'center' }}>
+            <h2 style={{ marginTop: 0, fontSize: '1.125rem' }}>Proposal not found</h2>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted, #64748b)' }}>
+              No proposal matches the link you followed. It may have been removed or the id is invalid.
+            </p>
+            <button
+              onClick={closeProposal}
+              style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer' }}
+            >
+              Back to proposals
+            </button>
+          </div>
+        </div>
+      )}
+
       {selected && (
         <ProposalDetail
           proposal={selected}
           decimals={decimals}
           walletAddress={walletAddress}
           adminAddress={ADMIN_ADDRESS}
-          onClose={() => {
-            setSelected(null);
-            // Restore scroll position to where it was when the detail was opened
-            window.scrollTo({ top: scrollPositionRef.current });
-          }}
+          onClose={closeProposal}
+          onVoteSuccess={() => { refreshBalance().catch(() => {}); }}
           triggerRef={triggerRef}
         />
       )}
