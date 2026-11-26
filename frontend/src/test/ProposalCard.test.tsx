@@ -52,4 +52,12 @@ describe('ProposalCard', () => {
     render(<ProposalCard proposal={{ ...mockProposal, state: 'Rejected' }} decimals={0} onClick={vi.fn()} />);
     expect(screen.getByText('Rejected')).toBeInTheDocument();
   });
+
+  it('shows full proposer address in title and aria-label with copy button', () => {
+    render(<ProposalCard proposal={mockProposal} decimals={0} onClick={vi.fn()} />);
+    const addressEl = screen.getByTitle(mockProposal.proposer);
+    expect(addressEl).toHaveAttribute('title', mockProposal.proposer);
+    expect(addressEl).toHaveAttribute('aria-label', mockProposal.proposer);
+    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+  });
 });

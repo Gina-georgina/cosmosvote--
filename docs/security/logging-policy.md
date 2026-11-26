@@ -157,7 +157,55 @@ Example entry:
 
 ---
 
+## Faucet Claim Log Events
+
+The faucet backend emits one structured JSON log line per claim attempt via
+`logger.ts` (pino).  Each line describes a single `faucet_claim` event.
+
+### Required Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `event` | string | Always `faucet_claim` |
+| `outcome` | string | One of `success`, `rate_limited`, `failure` |
+| `walletHash` | string | SHA-256 hash (hex) of the wallet address; the plaintext address **must never** appear |
+| `timestamp` | string (RFC 3339, UTC) | When the claim was processed |
+
+### Optional Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `transactionHash` | string | On-chain transaction hash for a successful claim (masked per `mask_tx_hash` where a general-purpose sink is used) |
+| `retryAt` | string (RFC 3339, UTC) | Earliest time the wallet may retry; present on `rate_limited` |
+| `errorClass` | string | Error classification for `failure` (not a raw error message that may embed addresses) |
+
+Implementations **may** add fields (e.g. `request_id`) but **must not** omit
+or rename the fields above.
+
+### Outcome Semantics
+
+- `success` — tokens were dispensed; `transactionHash` is present.
+- `rate_limited` — the claim was rejected by the rate limiter; `retryAt` is present.
+- `failure` — the claim could not be completed; `errorClass` is present.
+
+### Example Entries
+
+```json
+{"event":"faucet_claim","outcome":"success","walletHash":"9f2c…","timestamp":"2025-01-15T12:34:56Z","transactionHash":"abcdef12…"}
+{"event":"faucet_claim","outcome":"rate_limited","walletHash":"9f2c…","timestamp":"2025-01-15T12:35:10Z","retryAt":"2025-01-15T13:35:10Z"}
+{"event":"faucet_claim","outcome":"failure","walletHash":"9f2c…","timestamp":"2025-01-15T12:36:02Z","errorClass":"rpc_unavailable"}
+```
+
+### Privacy Rule
+
+Plaintext wallet addresses **must never** appear in faucet claim logs.  Only
+the SHA-256 `walletHash` is logged, so claim volume and abuse patterns can be
+monitored without exposing raw addresses.
+
+---
+
 ## Log Sink Guidance
+=======
 
 | Sink | Recommendation |
 |---|---|

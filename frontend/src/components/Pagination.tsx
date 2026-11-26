@@ -20,6 +20,12 @@ interface Props {
   onNext: () => void;
   /** Optional callback for direct page selection; renders numbered buttons when provided. */
   onPage?: (page: number) => void;
+  /**
+   * Optional callback invoked whenever the page changes (prev/next/direct).
+   * Used to reset the virtualised proposal list scroll offset so the new page
+   * starts at the top of the viewport.
+   */
+  onPageChange?: (page: number) => void;
 }
 
 /**
@@ -78,7 +84,7 @@ function pageBtnStyle(isCurrent: boolean): React.CSSProperties {
   };
 }
 
-export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onNext, onPage }: Props) {
+export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onNext, onPage, onPageChange }: Props) {
   const start = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalCount);
   const summaryText = totalCount === 0
@@ -86,6 +92,24 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
     : `${start}–${end} of ${totalCount} proposal${totalCount !== 1 ? 's' : ''}`;
 
   const pageNumbers = onPage ? buildPageNumbers(page, totalPages) : [];
+
+  const handlePrev = () => {
+    if (page <= 1) return;
+    onPrev();
+    onPageChange?.(page - 1);
+  };
+
+  const handleNext = () => {
+    if (page >= totalPages) return;
+    onNext();
+    onPageChange?.(page + 1);
+  };
+
+  const handlePage = (num: number) => {
+    if (num === page) return;
+    onPage?.(num);
+    onPageChange?.(num);
+  };
 
   return (
     <nav
@@ -105,7 +129,7 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
         <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Previous */}
           <button
-            onClick={onPrev}
+            onClick={handlePrev}
             disabled={page <= 1}
             aria-label="Go to previous page"
             style={navBtnStyle(page <= 1)}
@@ -126,7 +150,7 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
             ) : (
               <button
                 key={num}
-                onClick={() => onPage?.(num)}
+                onClick={() => handlePage(num)}
                 disabled={num === page}
                 aria-label={`Go to page ${num}`}
                 aria-current={num === page ? 'page' : undefined}
@@ -140,7 +164,7 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
           {/* Current / total display when no onPage handler */}
           {!onPage && (
             <span
-              aria-current="page"
+              aria-label={`Page ${page} of ${totalPages || 1}`}
               style={{ padding: '0.4rem 0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary, #555)' }}
             >
               {page} / {totalPages || 1}
@@ -149,7 +173,7 @@ export function Pagination({ page, totalPages, totalCount, pageSize, onPrev, onN
 
           {/* Next */}
           <button
-            onClick={onNext}
+            onClick={handleNext}
             disabled={page >= totalPages}
             aria-label="Go to next page"
             style={navBtnStyle(page >= totalPages)}

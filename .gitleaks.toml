@@ -24,13 +24,17 @@ keywords = ["S"]
 description = "Allow known test fixtures / placeholder Stellar keys"
 regexes = [
   '''S[A-Z2-7]{55}''',
+  '''(?i)(?:example|placeholder|dummy|sample|fake|redacted|changeme)''',
 ]
 paths = [
   '''(^|/)test(s)?/''',
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
   '''(^|/)\.env\.example$''',
 ]
 
@@ -45,13 +49,18 @@ keywords = ["secret", "stellar", "SECRET"]
 description = "Allow placeholders and test fixtures"
 regexes = [
   '''(?i)(?:example|placeholder|dummy|sample|fake|redacted|changeme|your[_-]?secret)''',
+  '''^\$\{[^}]+\}$''',
+  '''^process\.env\.''',
 ]
 paths = [
   '''(^|/)test(s)?/''',
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
   '''(^|/)\.env\.example$''',
 ]
 
@@ -68,13 +77,17 @@ regexes = [
   '''(?i)(?:example|placeholder|dummy|sample|fake|redacted|changeme|your[_-]?(?:api|token|key)|xxx+|todo)''',
   '''^\$\{[^}]+\}$''',
   '''^process\.env\.''',
+  '''(?i)^(?:test|mock|fixture|stub)[_-]?(?:api|token|key)''',
 ]
 paths = [
   '''(^|/)test(s)?/''',
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
   '''(^|/)\.env\.example$''',
 ]
 
@@ -97,7 +110,10 @@ paths = [
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
   '''(^|/)\.env\.example$''',
 ]
 
@@ -114,7 +130,10 @@ paths = [
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
 ]
 
 [[rules]]
@@ -128,13 +147,17 @@ description = "Allow placeholders, env var references and test fixtures"
 regexes = [
   '''(?i)(?:example|placeholder|dummy|sample|fake|redacted|changeme|user:pass|username:password)''',
   '''\$\{[^}]+\}''',
+  '''(?i)(?:localhost|127\.0\.0\.1|0\.0\.0\.0)''',
 ]
 paths = [
   '''(^|/)test(s)?/''',
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
   '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
   '''(^|/)\.env\.example$''',
 ]
 
@@ -150,6 +173,9 @@ paths = [
   '''(^|/)__tests__/''',
   '''(^|/)fixtures?/''',
   '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
+  '''\.(md|mdx|rst|txt)$''',
 ]
 
 # ---------------------------------------------------------------------------
@@ -171,7 +197,35 @@ paths = [
   '''(^|/)vendor/''',
   '''(^|/)dist/''',
   '''(^|/)build/''',
+  '''(^|/)coverage/''',
+  '''(^|/)\.next/''',
+  '''(^|/)out/''',
+  '''(^|/)\.git/''',
+  '''(^|/)test(s)?/''',
+  '''(^|/)__tests__/''',
+  '''(^|/)__mocks__/''',
+  '''(^|/)fixtures?/''',
+  '''(^|/)mocks?/''',
+  '''(^|/)examples?/''',
+  '''(^|/)docs?/''',
+  '''(^|/)samples?/''',
+  '''\.(test|spec)\.[jt]sx?$''',
+  '''\.(md|mdx|rst|txt)$''',
 ]
 regexes = [
   '''(?i)(?:example|placeholder|dummy|sample|fake|redacted|changeme|your[_-]?(?:secret|key|token))''',
+  '''(?i)(?:<[^>]+>|\$\{[^}]+\}|\{\{[^}]+\}\})''',
+  '''(?i)(?:x{4,}|\*{4,}|\.{3,}|…+)''',
+  '''(?i)(?:process\.env\.|os\.environ|getenv\()''',
+  '''(?i)(?:test|mock|fixture|stub)[_-]?(?:secret|key|token)''',
 ]
+stopwords = [
+  "example",
+  "placeholder",
+  "dummy",
+  "sample",
+  "fake",
+  "redacted",
+  "changeme",
+]
+=======

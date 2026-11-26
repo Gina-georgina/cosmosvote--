@@ -203,6 +203,48 @@ fn test_burn_insufficient_fails() {
 }
 
 #[test]
+fn test_burn_from() {
+    let env = Env::default();
+    let (token, admin, user) = setup(&env);
+    let spender = Address::generate(&env);
+    let expiry = env.ledger().sequence() + 10;
+
+    token.transfer(&admin, &user, &1_000_000i128);
+    token.approve(&user, &spender, &500_000i128, &expiry);
+    token.burn_from(&spender, &user, &200_000i128);
+
+    assert_eq!(token.balance(&user), 800_000);
+    assert_eq!(token.allowance(&user, &spender), 300_000);
+    assert_eq!(token.total_supply(), 999_800_000);
+}
+
+#[test]
+fn test_burn_from_exceeds_allowance_fails() {
+    let env = Env::default();
+    let (token, admin, user) = setup(&env);
+    let spender = Address::generate(&env);
+    let expiry = env.ledger().sequence() + 10;
+
+    token.transfer(&admin, &user, &1_000_000i128);
+    token.approve(&user, &spender, &100i128, &expiry);
+    let result = token.try_burn_from(&spender, &user, &200i128);
+    assert_eq!(result, Err(Ok(ContractError::AllowanceExceeded)));
+}
+
+#[test]
+fn test_burn_from_insufficient_balance_fails() {
+    let env = Env::default();
+    let (token, admin, user) = setup(&env);
+    let spender = Address::generate(&env);
+    let expiry = env.ledger().sequence() + 10;
+
+    token.transfer(&admin, &user, &100i128);
+    token.approve(&user, &spender, &1_000_000i128, &expiry);
+    let result = token.try_burn_from(&spender, &user, &1_000i128);
+    assert_eq!(result, Err(Ok(ContractError::InsufficientBalance)));
+}
+
+#[test]
 fn test_burn_self() {
     let env = Env::default();
     let (token, admin, user) = setup(&env);

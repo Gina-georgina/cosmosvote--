@@ -18,7 +18,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 export type Theme = 'light' | 'dark';
 
-const STORAGE_KEY = 'cosmosvote-theme';
+const STORAGE_KEY = 'cosmosvote:theme';
 
 /** Read the initial theme from localStorage or system preference. */
 function resolveInitialTheme(): Theme {

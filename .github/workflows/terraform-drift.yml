@@ -1,0 +1,102 @@
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  drift-detection:
+    name: Detect drift (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - staging
+          - production
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure read-only AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_READONLY_ROLE_ARN }}
+          role-session-name: terraform-drift-${{ matrix.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || '1.7.5' }}
+
+      - name: Terraform init
+        id: init
+        working-directory: infra/terraform
+        run: terraform init -input=false -backend-config=backends/${{ matrix.environment }}.hcl
+
+      - name: Terraform plan (drift detection)
+        id: plan
+        working-directory: infra/terraform
+        continue-on-error: true
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -no-color -out=tfplan-${{ matrix.environment }}
+          EXIT_CODE=$?
+          echo "exitcode=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "No drift detected for ${{ matrix.environment }}."
+          elif [ "$EXIT_CODE" -eq 1 ]; then
+            echo "::error::Terraform plan failed for ${{ matrix.environment }}."
+          elif [ "$EXIT_CODE" -eq 2 ]; then
+            echo "::warning::Drift detected for ${{ matrix.environment }}."
+          else
+            echo "::error::Unexpected terraform plan exit code $EXIT_CODE for ${{ matrix.environment }}."
+          fi
+          exit 0
+
+      - name: Send drift alert to team webhook
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          TEAM_WEBHOOK_URL: ${{ secrets.TEAM_WEBHOOK_URL }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TEAM_WEBHOOK_URL" ]; then
+            echo "::error::TEAM_WEBHOOK_URL secret is not configured; cannot send drift alert."
+            exit 1
+          fi
+          PAYLOAD=$(jq -n \
+            --arg env "$ENVIRONMENT" \
+            --arg run "$RUN_URL" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{
+              text: ("⚠️ Terraform drift detected in *" + $env + "* for `" + $repo + "`.\nThe declared Terraform state diverges from actual cloud resources.\nReview the plan: " + $run)
+            }')
+          curl --fail --silent --show-error \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" \
+            "$TEAM_WEBHOOK_URL"
+
+      - name: Fail job on drift
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "::error::Terraform drift detected for ${{ matrix.environment }}. See alert and plan output."
+          exit 1
+
+      - name: Fail job on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::Terraform plan failed for ${{ matrix.environment }}."
+          exit 1

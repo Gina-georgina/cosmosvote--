@@ -6,6 +6,52 @@ See also: [Contract API Reference](./api/) · [README](../README.md)
 
 ---
 
+## Backend HTTP Errors (RFC 7807)
+
+All backend HTTP services (`backend/src/health.ts`, `backend/src/faucet.ts`) return error
+responses as `application/problem+json`, per [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807).
+Every error body has the shape:
+
+```json
+{
+  "type": "https://cosmosvote.dev/errors/not-found",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "No route for GET /unknown.",
+  "instance": "/unknown"
+}
+```
+
+| Field      | Meaning                                                            |
+|------------|---------------------------------------------------------------------|
+| `type`     | A URI identifying the problem category (`about:blank` if generic). |
+| `title`    | Short, human-readable summary of the error type.                   |
+| `status`   | The HTTP status code, duplicated in the body for convenience.      |
+| `detail`   | Human-readable explanation specific to this occurrence.            |
+| `instance` | The request path that produced the error.                          |
+
+Clients should branch on `status` (and, where present, `type`) rather than parsing `title`
+or `detail`, which are meant for humans/logs.
+
+### Common statuses
+
+| Status | When it happens |
+|--------|------------------|
+| 400 | Malformed request body / invalid input (e.g. faucet claim with a bad address). |
+| 401 | Missing/invalid `METRICS_TOKEN` bearer token on `/metrics`. |
+| 403 | Request origin not in the CORS allowlist. |
+| 404 | No matching route. |
+| 405 | Unsupported HTTP method for an otherwise valid route. |
+| 429 | Rate limit or faucet cooldown exceeded (see `Retry-After` header). |
+| 502 | Upstream Stellar RPC / mint failure. |
+| 503 | Readiness check failed, or the request exceeded `REQUEST_TIMEOUT_MS`. |
+
+The implementation lives in `backend/src/problemJson.ts` (helper + `PROBLEM_TYPES`) and is
+used by `backend/src/health.ts`, `backend/src/faucet.ts`, `backend/src/rateLimiter.ts`,
+`backend/src/metrics.ts`, and `backend/src/requestTimeout.ts`.
+
+---
+
 ## Governance Contract Errors
 
 ### Initialization errors (1–2)
@@ -66,9 +112,9 @@ async function getProposal(contractId: string, proposalId: bigint) {
 
 | Field | Detail |
 |-------|--------|
-| **Trigger** | An action that requires `ProposalState::Active` (vote, amend, cancel, finalize-retry) is called after the state has already transitioned. |
-| **Common causes** | Voting on an already-finalized or cancelled proposal; attempting to finalize an already-finalized proposal. |
-| **Client action** | Check `proposal.state` before submitting. Display a clear status badge (`Passed`, `Rejected`, `Executed`, or `Cancelled`) and disable action buttons accordingly. |
+| **Trigger** | An action that requires `ProposalState::Active` (vote, amend, cancel, finalize-retry) is called after the state has already transitioned. In particular, `finalise()` returns this error whenever the proposal state is not `Active` — including a second `finalise()` call on a proposal that is already `Passed`, `Rejected`, `Executed`, or `Cancelled`. |
+| **Common causes** | Voting on an already-finalized or cancelled proposal; attempting to finalize an already-finalized proposal; double-finalising a proposal (e.g. a retried transaction that already landed, or two clients racing to finalise the same proposal). |
+| **Client action** | Check `proposal.state` before submitting. Display a clear status badge (`Passed`, `Rejected`, `Executed`, or `Cancelled`) and disable action buttons accordingly. Before calling `finalise()`, fetch the proposal with `get_proposal(id)` and only submit when `state == Active`; treat a `ProposalNotActive` error on finalise as a no-op (the proposal is already finalised and no state was mutated). |
 
 #### `ProposalNotPassed` — code 12
 
@@ -365,6 +411,7 @@ async function getVotingPower(
 | **Trigger** | The on-chain treasury disbursement via `disburse()` fails during `execute()`. |
 | **Common causes** | Treasury contract not deployed or paused; insufficient treasury balance for the requested disbursement; cross-contract invocation error. |
 | **Client action** | Inspect the transaction's diagnostic events for the treasury sub-call failure. Resolve the treasury issue and retry `execute()`. |
+| **Proposal state** | The proposal is moved to `ProposalState::ExecutionFailed` instead of being left in `Passed` (which would misleadingly suggest execution never ran) or `Executed` (which would misreport success). `execute()` accepts proposals in either `Passed` or `ExecutionFailed` state, so the admin can call `execute()` again after fixing the underlying issue — it will retry the disbursement and move to `Executed` on success. |
 
 ---
 

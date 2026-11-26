@@ -5,6 +5,10 @@ interface Props {
   confirmColor?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  reasonLabel?: string;
+  reasonValue?: string;
+  onReasonChange?: (value: string) => void;
+  reasonPlaceholder?: string;
 }
 
 const overlay: React.CSSProperties = {
@@ -17,12 +21,33 @@ const dialog: React.CSSProperties = {
   maxWidth: 420, width: '90%',
 };
 
-export function ConfirmModal({ title, message, confirmLabel, confirmColor = '#dc2626', onConfirm, onCancel }: Props) {
+export function ConfirmModal({
+  title,
+  message,
+  confirmLabel,
+  confirmColor = '#dc2626',
+  onConfirm,
+  onCancel,
+  reasonLabel,
+  reasonValue,
+  onReasonChange,
+  reasonPlaceholder,
+}: Props) {
+  const showReason = reasonLabel !== undefined || onReasonChange !== undefined;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      onCancel();
+    }
+  };
+
   return (
     <div style={overlay} onClick={onCancel}>
       <div
         style={dialog}
         onClick={e => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
@@ -30,6 +55,28 @@ export function ConfirmModal({ title, message, confirmLabel, confirmColor = '#dc
       >
         <h3 id="confirm-title" style={{ margin: '0 0 0.75rem' }}>{title}</h3>
         <p id="confirm-msg" style={{ margin: '0 0 1.5rem', color: '#555' }}>{message}</p>
+        {showReason && (
+          <div style={{ margin: '0 0 1.5rem' }}>
+            <label
+              htmlFor="confirm-reason"
+              style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}
+            >
+              {reasonLabel ?? 'Reason'}
+            </label>
+            <textarea
+              id="confirm-reason"
+              value={reasonValue ?? ''}
+              onChange={e => onReasonChange?.(e.target.value)}
+              placeholder={reasonPlaceholder}
+              rows={3}
+              style={{
+                width: '100%', boxSizing: 'border-box', padding: '0.5rem',
+                border: '1px solid #d1d5db', borderRadius: 6, resize: 'vertical',
+                fontFamily: 'inherit', fontSize: 'inherit',
+              }}
+            />
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
           <button
             onClick={onCancel}

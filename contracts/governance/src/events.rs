@@ -4,6 +4,20 @@ use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 
 use crate::types::{ProposalState, Vote};
 
+/// Emitted when the contract is paused by the admin.
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractPaused {
+    pub admin: Address,
+}
+
+/// Emitted when the contract is unpaused by the admin.
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUnpaused {
+    pub admin: Address,
+}
+
 pub struct GovernanceEvents;
 
 impl GovernanceEvents {
@@ -170,14 +184,18 @@ impl GovernanceEvents {
     pub fn paused(env: &Env, admin: &Address) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("paused")),
-            admin.clone(),
+            ContractPaused {
+                admin: admin.clone(),
+            },
         );
     }
 
     pub fn unpaused(env: &Env, admin: &Address) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("unpause")),
-            admin.clone(),
+            ContractUnpaused {
+                admin: admin.clone(),
+            },
         );
     }
 
@@ -243,10 +261,13 @@ impl GovernanceEvents {
         );
     }
 
-    /// Emitted when the admin updates the `restrict_admin_vote` policy via
-    /// `set_restrict_admin_vote`.
-    ///
-    /// Fields: `(admin, old_value, new_value)`
+    /// Emitted by `update_proposal_cooldown` when the admin changes the
+    /// proposal cooldown. Payload: `(admin, old_cooldown, new_cooldown)`.
+    /// Shares the `("gov", "cooldown")` topic with `cooldown_updated`.
+    pub fn proposal_cooldown_updated(env: &Env, admin: &Address, old_value: u64, new_value: u64) {
+        Self::cooldown_updated(env, admin, old_value, new_value);
+    }
+
     pub fn restrict_admin_vote_updated(env: &Env, admin: &Address, old_value: bool, new_value: bool) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("restrict")),

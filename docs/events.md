@@ -302,9 +302,10 @@ Emitted on an immediate (single-step) admin transfer.
 
 ---
 
-### `paused`
+### `ContractPaused`
 
-Emitted when the admin pauses the contract.
+Emitted when the admin pauses the contract (`pause`). The payload is the
+`ContractPaused { admin }` struct, encoded as a single-field tuple.
 
 | Field | Topic index | Type | Description |
 |-------|-------------|------|-------------|
@@ -313,20 +314,21 @@ Emitted when the admin pauses the contract.
 
 | Field | Data index | Type | Description |
 |-------|------------|------|-------------|
-| admin | — | Address | Admin that paused (scalar, not tuple) |
+| admin | 0 | Address | Admin that paused the contract |
 
 ```json
 {
   "topics": ["gov", "paused"],
-  "data": "GABC...ADMIN"
+  "data": ["GABC...ADMIN"]
 }
 ```
 
 ---
 
-### `unpaused`
+### `ContractUnpaused`
 
-Emitted when the admin resumes the contract.
+Emitted when the admin resumes the contract (`unpause`). The payload is the
+`ContractUnpaused { admin }` struct, encoded as a single-field tuple.
 
 | Field | Topic index | Type | Description |
 |-------|-------------|------|-------------|
@@ -335,12 +337,65 @@ Emitted when the admin resumes the contract.
 
 | Field | Data index | Type | Description |
 |-------|------------|------|-------------|
-| admin | — | Address | Admin that unpaused (scalar, not tuple) |
+| admin | 0 | Address | Admin that unpaused the contract |
 
 ```json
 {
   "topics": ["gov", "unpause"],
-  "data": "GABC...ADMIN"
+  "data": ["GABC...ADMIN"]
+}
+```
+
+---
+
+### `proposal_cooldown_updated`
+
+Emitted when the admin changes the proposal cooldown period.
+
+| Field | Topic index | Type | Description |
+|-------|-------------|------|-------------|
+| contract_tag | 0 | Symbol | `"gov"` |
+| event_tag | 1 | Symbol | `"cooldown"` |
+
+| Field | Data index | Type | Description |
+|-------|------------|------|-------------|
+| admin | 0 | Address | Admin that updated the cooldown |
+| old_value | 1 | u64 | Previous cooldown (in ledgers) |
+| new_value | 2 | u64 | Updated cooldown (in ledgers) |
+
+```json
+{
+  "topics": ["gov", "cooldown"],
+  "data": ["GABC...ADMIN", 100, 250]
+}
+```
+
+---
+
+## Treasury Contract
+
+Contract tag: **`treasury`**
+
+### `disbursed`
+
+Emitted on every `disburse` call, recording the funds sent to a recipient.
+
+| Field | Topic index | Type | Description |
+|-------|-------------|------|-------------|
+| contract_tag | 0 | Symbol | `"treasury"` |
+| event_tag | 1 | Symbol | `"disbursed"` |
+
+| Field | Data index | Type | Description |
+|-------|------------|------|-------------|
+| recipient | 0 | Address | Address receiving the disbursement |
+| amount | 1 | i128 | Amount disbursed |
+| asset | 2 | Enum | Asset disbursed (e.g. `"Native"` \| `"Token"`) |
+| proposal_id | 3 | u64 | Proposal that authorized the disbursement |
+
+```json
+{
+  "topics": ["treasury", "disbursed"],
+  "data": ["GABC...RECIPIENT", 500000, ["Native"], 7]
 }
 ```
 
@@ -522,6 +577,8 @@ Emitted when the token admin is changed.
 | gov | admin_transferred | `gov`, `admin` | old_admin, new_admin |
 | gov | paused | `gov`, `paused` | admin |
 | gov | unpaused | `gov`, `unpause` | admin |
+| gov | proposal_cooldown_updated | `gov`, `cooldown` | admin, old_value, new_value |
+| treasury | disbursed | `treasury`, `disbursed` | recipient, amount, asset, proposal_id |
 | token | initialized | `token`, `init` | admin, supply |
 | token | transfer | `token`, `xfer` | from, to, amount |
 | token | approval | `token`, `approve` | owner, spender, amount, expiry_ledger (Option\<u32\>) |
