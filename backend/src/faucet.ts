@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
 import { resolveFaucetSecretKey } from './secrets';
@@ -13,6 +14,7 @@ import {
   rpc as SorobanRpc,
 } from '@stellar/stellar-sdk';
 import Database from 'better-sqlite3';
+import { logger } from './logger';
 
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
@@ -289,6 +291,7 @@ export function createFaucetServer(
       return;
     }
 
+    const walletHash = hashWalletAddress(address);
     const now = Date.now();
     let retryAt: number | null;
     try {
@@ -302,6 +305,13 @@ export function createFaucetServer(
       throw error;
     }
     if (retryAt !== null) {
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'rate_limited',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        retryAt: new Date(retryAt).toISOString(),
+      });
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
       sendProblem(response, request, {
         type: PROBLEM_TYPES.tooManyRequests,
@@ -314,6 +324,13 @@ export function createFaucetServer(
 
     try {
       const transactionHash = await mint(config, address);
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'success',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        transactionHash,
+      });
       sendJson(response, 200, {
         amount: tokenAmountDisplay(config.amount, config.tokenDecimals),
         symbol: 'VOTE',

@@ -222,6 +222,63 @@ export default function App() {
     return filtered.slice(start, start + PAGE_SIZE);
   }, [filtered, safePage]);
 
+  // ── Virtualised proposal list (Issue #408) ──────────────────────────────
+  const listRef = useRef<HTMLDivElement>(null);
+  const { restoreProposalScrollOffset, setProposalScrollOffset } = useProposalStore();
+
+  const virtualizer = useVirtualizer({
+    count: pagedProposals.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 180,
+    overscan: 5,
+  });
+
+  // Restore the persisted scroll offset on mount and on browser back/forward.
+  useEffect(() => {
+    const restore = () => {
+      const offset = restoreProposalScrollOffset();
+      if (offset > 0 && listRef.current) {
+        listRef.current.scrollTop = offset;
+      }
+    };
+    restore();
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, [restoreProposalScrollOffset]);
+
+  const handleListScroll = useCallback(() => {
+    if (listRef.current) {
+      setProposalScrollOffset(listRef.current.scrollTop);
+    }
+  }, [setProposalScrollOffset]);
+
+  // Keyboard navigation between cards (ArrowDown / ArrowUp) after virtualisation.
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const container = listRef.current;
+    if (!container) return;
+    const cards = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-proposal-card]')
+    );
+    if (cards.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const currentIndex = active ? cards.indexOf(active) : -1;
+    let nextIndex: number;
+    if (e.key === 'ArrowDown') {
+      nextIndex = currentIndex < 0 ? 0 : Math.min(cards.length - 1, currentIndex + 1);
+    } else {
+      nextIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
+    }
+    e.preventDefault();
+    const target = cards[nextIndex];
+    if (target) {
+      target.focus();
+      // Ensure the focused card is scrolled into view within the virtual list.
+      const virtualIndex = Number(target.dataset.virtualIndex ?? nextIndex);
+      virtualizer.scrollToIndex(virtualIndex, { align: 'auto' });
+    }
+  }, [virtualizer]);
+
   // AriaLive page-change announcement (Issue #19)
   const [pageAnnouncement, setPageAnnouncement] = useState('');
 
@@ -480,9 +537,42 @@ export default function App() {
                   scrollPositionRef.current = window.scrollY;
                   openProposal(p);
                 }}
-              />
-            ))}
-          </div>
+              >
+                {virtualizer.getVirtualItems().map(virtualRow => {
+                  const p = pagedProposals[virtualRow.index];
+                  return (
+                    <div
+                      key={String(p.id)}
+                      ref={virtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualRow.start}px)`,
+                        paddingBottom: '1rem',
+                      }}
+                    >
+                      <ProposalCard
+                        proposal={p}
+                        decimals={decimals}
+                        data-proposal-card
+                        data-virtual-index={virtualRow.index}
+                        onClick={(e) => {
+                          triggerRef.current = e?.currentTarget as HTMLElement ?? null;
+                          // Preserve scroll position so it can be restored when detail closes
+                          scrollPositionRef.current = listRef.current?.scrollTop ?? 0;
+                          setProposalScrollOffset(scrollPositionRef.current);
+                          setSelected(p);
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {!loading && filtered.length > 0 && (
             <Pagination

@@ -3,6 +3,7 @@ import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
+import { requestContext } from './requestContext';
 import helmet from 'helmet';
 import compression from 'compression';
 

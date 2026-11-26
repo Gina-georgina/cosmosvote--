@@ -56,6 +56,15 @@ const envSchema = z.object({
     .transform((v) => (v ? Number(v) : 6_000))
     .refine((n) => Number.isInteger(n) && n > 0, 'POLL_INTERVAL_MS must be a positive integer'),
 
+  HORIZON_MAX_RETRIES: z
+    .string()
+    .optional()
+    .transform((v) => (v ? Number(v) : 5))
+    .refine(
+      (n) => Number.isInteger(n) && n > 0,
+      'HORIZON_MAX_RETRIES must be a positive integer',
+    ),
+
   // ── Health server ─────────────────────────────────────────────────────────
   HEALTH_PORT: z
     .string()
