@@ -2,6 +2,7 @@
    Responsive layout for CosmosVote frontend
    Breakpoints:  ≥1024 desktop  |  768-1023 tablet  |  <768 mobile  |  <480 small-mobile
    Issue #266 – Responsive mobile layout for proposal browsing
+   Issue #405 – Improve mobile layout of ProposalCard vote bar
    ============================================================= */
 
 /* ── Base / shared layout helpers ── */
@@ -207,6 +208,46 @@
   }
 }
 
+/* ── 375px and below (narrow mobile) – Issue #405 ── */
+@media (max-width: 375px) {
+  /* Vote bar: stack segments vertically so the bar never overflows */
+  .vote-bar {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 0.25rem;
+    box-sizing: border-box;
+  }
+
+  /* Each vote segment becomes a full-width row */
+  .vote-bar-segment {
+    width: 100% !important;
+    min-width: 0;
+    flex: 0 0 auto;
+    border-radius: 4px;
+  }
+
+  /* Percentage labels: keep readable, prevent clipping/overflow */
+  .vote-bar-label,
+  .vote-bar-percentage {
+    font-size: 0.7rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: normal;
+  }
+
+  /* Legend / counts row under the bar: wrap cleanly */
+  .vote-bar-legend,
+  .vote-counts-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
+}
+
 /* ── 320px (minimum supported width) ── */
 @media (max-width: 320px) {
   .app-header {
@@ -219,5 +260,35 @@
 
   .stats-bar {
     grid-template-columns: 1fr;
+  }
+
+  /* Issue #405 – reinforce vote bar stacking at minimum width */
+  .vote-bar {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.2rem;
+  }
+
+  .vote-bar-segment {
+    width: 100% !important;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  /* Keep percentages legible down to 320px */
+  .vote-bar-label,
+  .vote-bar-percentage {
+    font-size: 0.65rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .vote-bar-legend,
+  .vote-counts-row {
+    flex-wrap: wrap;
+    gap: 0.2rem 0.4rem;
+    font-size: 0.65rem;
   }
 }

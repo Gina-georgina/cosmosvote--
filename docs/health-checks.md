@@ -11,8 +11,39 @@ Health check configuration and remediation guide for deployed CosmosVote service
 | Frontend (Vite/React) | `http://<host>:3000/` | GET | HTTP 200 |
 | Backend liveness | `http://<host>:8080/health` | GET | `{"status":"ok","uptime":<seconds>}` |
 | Backend readiness | `http://<host>:8080/ready` | GET | HTTP 200 when Soroban RPC is healthy; otherwise HTTP 503 |
+| Backend version | `http://<host>:8080/version` | GET | `{"version":"<version>","commitSha":"<sha>","buildDate":"<date>"}` |
 | Horizon RPC Connector | `https://<horizon-url>/` | GET | HTTP 200 + JSON |
 | Soroban RPC | `https://<rpc-url>/` | POST `getHealth` | `{"status":"healthy"}` |
+
+### Version Endpoint
+
+`GET /version` returns the build metadata of the running notification service. It does not require authentication, so it can be used by deployment pipelines and monitoring to confirm which release is live.
+
+```bash
+curl -s http://<host>:8080/version | jq .
+# expected:
+# {
+#   "version": "1.4.0",
+#   "commitSha": "3f2a9c1",
+#   "buildDate": "2024-06-01T12:00:00Z"
+# }
+```
+
+The values are injected at build time from environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `VERSION` | Release version string (e.g. `1.4.0`) |
+| `COMMIT_SHA` | Git commit SHA of the deployed build |
+| `BUILD_DATE` | ISO 8601 timestamp of when the build was produced |
+
+These are read when the backend starts (or baked into the image during the build step) and served verbatim by `/version`. If a variable is unset, the corresponding field is returned as an empty string, so a missing value is visible rather than silently defaulted.
+
+```bash
+VERSION=1.4.0 COMMIT_SHA=$(git rev-parse --short HEAD) \
+  BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  docker compose up -d backend
+```
 
 ### Soroban RPC Health Call
 
@@ -45,12 +76,25 @@ services:
 
   backend:
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
+```
 
-Use `/ready` for readiness probes. `/health` only indicates that the backend process is running. This backend has no database; `/ready` checks the configured Soroban RPC using `getHealth` and returns HTTP 503 if the RPC is unreachable or unhealthy.
+Use `/health/ready` for readiness probes. `/health/live` only indicates that the backend process is running and always returns HTTP 200 while the process is up. `/health/ready` checks both the database connection and the configured Soroban RPC (using `getHealth`), and returns HTTP 503 if the database connection fails or the RPC is unreachable or unhealthy.
+
+For orchestrators that support separate liveness and readiness probes (e.g. Kubernetes), point the liveness probe at `/health/live` and the readiness probe at `/health/ready`:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
 ```
 
 ### Cron-Based Probe Script
@@ -88,6 +132,7 @@ Add to crontab (every 5 minutes):
 |---------|-------------|
 | Frontend down | `docker compose restart frontend` or redeploy static build |
 | Notification service down | `docker compose restart notification`; check logs with `docker compose logs notification` |
+| Database connection failing (`/health/ready` returns 503) | Verify the database is running and reachable; check `DATABASE_URL` and connection pool settings, then `docker compose restart backend` |
 | Horizon RPC unreachable | Switch `STELLAR_HORIZON_URL` to a fallback endpoint (e.g., `https://horizon.stellar.org`) |
 | Soroban RPC unhealthy | Check ledger sync status; switch `STELLAR_RPC_URL` to alternate RPC provider |
 | All services down | Restart full stack: `docker compose down && docker compose up -d` |

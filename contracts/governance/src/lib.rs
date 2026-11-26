@@ -37,6 +37,10 @@ mod cross_contract_tests;
 mod validation_tests;
 #[cfg(test)]
 mod voter_cap_tests;
+#[cfg(test)]
+mod error_coverage_tests;
+#[cfg(test)]
+mod quorum_tests;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -259,6 +263,8 @@ impl GovernanceContract {
             if action.amount <= 0 {
                 return Err(ContractError::InvalidTreasuryAmount);
             }
+            // Validate treasury recipient is not the zero address (issue #458)
+            Self::assert_valid_recipient(&env, &action.recipient)?;
         }
 
         let now = env.ledger().timestamp();
@@ -420,6 +426,9 @@ impl GovernanceContract {
         voter.require_auth();
         Self::assert_ready(&env)?;
 
+        // Fail-fast ordering: the cheapest guards run first so that invalid or
+        // duplicate votes abort before any cross-contract (token) reads are
+        // performed. The proposal is read exactly once and reused below.
         let mut proposal = GovernanceStorage::proposal(&env, proposal_id)
             .ok_or(ContractError::ProposalNotFound)?;
 
@@ -435,6 +444,8 @@ impl GovernanceContract {
             return Err(ContractError::VotingPeriodEnded);
         }
 
+        // Cheap persistent-flag guard: reject double-votes before touching the
+        // token contract (delegation / balance / supply reads).
         if GovernanceStorage::has_voted(&env, proposal_id, &voter) {
             return Err(ContractError::AlreadyVoted);
         }
@@ -736,15 +747,24 @@ impl GovernanceContract {
         let mut proposal = GovernanceStorage::proposal(&env, proposal_id)
             .ok_or(ContractError::ProposalNotFound)?;
 
-        if proposal.state != ProposalState::Passed {
+        if proposal.state != ProposalState::Passed && proposal.state != ProposalState::ExecutionFailed {
             return Err(ContractError::ProposalNotPassed);
         }
 
-        // Invoke treasury disbursement if a payload is attached
+        // Invoke treasury disbursement if a payload is attached. A failed
+        // cross-contract call leaves the proposal in `ExecutionFailed` rather
+        // than `Passed`, so state stays consistent and the admin can retry
+        // `execute()` once the underlying issue (e.g. insufficient treasury
+        // balance) is resolved.
         if let Some(action) = proposal.treasury_action.get(0) {
             if let Some(treasury_addr) = GovernanceStorage::treasury_contract(&env) {
                 let treasury = TreasuryClient::new(&env, &treasury_addr);
-                treasury.disburse(&action);
+                if treasury.try_disburse(&action).is_err() {
+                    proposal.state = ProposalState::ExecutionFailed;
+                    GovernanceStorage::set_proposal(&env, proposal_id, &proposal);
+                    GovernanceEvents::proposal_finalized(&env, proposal_id, &proposal.state);
+                    return Err(ContractError::ExecutionFailed);
+                }
             }
         }
 
@@ -1011,6 +1031,23 @@ impl GovernanceContract {
         Ok(())
     }
 
+    /// Update the per-proposer cooldown in seconds. Admin only.
+    ///
+    /// Alias of `set_proposal_cooldown` (issue #460) that emits the
+    /// `ProposalCooldownUpdated` event.
+    pub fn update_proposal_cooldown(
+        env: Env,
+        admin: Address,
+        new_cooldown: u64,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin)?;
+        let old_value = GovernanceStorage::proposal_cooldown(&env);
+        GovernanceStorage::set_proposal_cooldown(&env, new_cooldown);
+        GovernanceEvents::proposal_cooldown_updated(&env, &admin, old_value, new_cooldown);
+        Ok(())
+    }
+
     /// Update the admin vote restriction flag. Admin only.
     pub fn set_restrict_admin_vote(
         env: Env,
@@ -1057,6 +1094,22 @@ impl GovernanceContract {
     fn assert_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
         if GovernanceStorage::admin(env) != *caller {
             return Err(ContractError::NotAdmin);
+        }
+        Ok(())
+    }
+
+    /// Reject the all-zeros Stellar account (zero-address equivalent).
+    /// GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF is the strkey
+    /// encoding of a 32-byte zeroed public key — no valid keypair can sign for it.
+    fn assert_valid_recipient(env: &Env, recipient: &Address) -> Result<(), ContractError> {
+        let zero_addr = Address::from_string(
+            &soroban_sdk::String::from_str(
+                env,
+                "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            ),
+        );
+        if *recipient == zero_addr {
+            return Err(ContractError::InvalidRecipient);
         }
         Ok(())
     }

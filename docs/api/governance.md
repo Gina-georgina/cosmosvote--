@@ -118,6 +118,9 @@ pub fn create_proposal(
 | 19 | `ProposalCooldown` | Proposer is within cooldown window |
 | 20 | `QuorumBelowFloor` | Quorum < `min_quorum_bps` floor |
 | 40 | `ContractPaused` | Contract is paused |
+| 62 | `InvalidRecipient` | A treasury action recipient is the zero address |
+
+Treasury action recipients are validated at proposal creation time: any action whose `recipient` is the zero address is rejected with `InvalidRecipient (62)`.
 
 **Example**
 
@@ -325,6 +328,43 @@ Updates the quorum on an active proposal. Only allowed before any votes are cast
 
 ---
 
+## `update_proposal_cooldown`
+
+```rust
+pub fn update_proposal_cooldown(
+    env: Env,
+    admin: Address,
+    new_cooldown: u64,
+) -> Result<(), ContractError>
+```
+
+Updates the `proposal_cooldown` (in seconds) applied between proposals per address. Admin only.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `admin` | `Address` | Must auth; must be the current admin |
+| `new_cooldown` | `u64` | New cooldown in seconds (`0` = no cooldown) |
+
+**Returns:** `Ok(())` on success.
+
+**Events:** Emits `ProposalCooldownUpdated` with the previous and new cooldown values.
+
+**Errors**
+
+| Code | Error | Condition |
+|------|-------|-----------|
+| 30 | `NotAdmin` | Caller is not the admin |
+
+**Example**
+
+```rust
+gov.update_proposal_cooldown(&admin, &172_800u64); // 2-day cooldown
+```
+
+---
+
 ## `transfer_admin`
 
 ```rust
@@ -405,3 +445,4 @@ Read-only accessors for admin address, pending admin (if any), and contract vers
 | 41 | `NotPaused` | Contract is not paused |
 | 50 | `ArithmeticOverflow` | Integer overflow |
 | 61 | `MaxVotersReached` | Proposal has reached the `MAX_VOTER_COUNT` (10 000) unique voter limit |
+| 62 | `InvalidRecipient` | Treasury action recipient is the zero address |

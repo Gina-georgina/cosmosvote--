@@ -9,6 +9,11 @@ interface BeforeInstallPromptEvent extends Event {
 const DISMISSAL_SUPPRESS_DAYS = 7;
 const DISMISSAL_KEY = 'cosmosvote:pwa-dismiss-until';
 
+// NOTE: Installability (and therefore the `beforeinstallprompt` event) depends on
+// manifest.json declaring 192x192, 512x512 and maskable icons. Those icons are
+// provided by the manifest; no icon gating is needed here. Dismissal suppression
+// only hides the banner for DISMISSAL_SUPPRESS_DAYS and never blocks installs.
+
 function isSuppressed(): boolean {
   if (typeof window === 'undefined') return true;
   try {

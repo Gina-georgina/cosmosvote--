@@ -7,6 +7,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { sendProblem, PROBLEM_TYPES } from './problemJson';
 
 export interface RateLimiterOptions {
   windowMs?: number;
@@ -64,6 +65,78 @@ export class RateLimiter {
   }
 }
 
+/**
+ * Faucet-specific rate limiter keyed by a salted HMAC-SHA256 hash of the client
+ * IP. Plaintext IPs are never stored.
+ *
+ * Configuration (env vars):
+ *   FAUCET_IP_COOLDOWN_MS  – window length in milliseconds (default: 86 400 000 = 24 h)
+ *   FAUCET_IP_MAX          – max claims per window per IP (default: 1)
+ *   FAUCET_IP_HASH_SECRET  – HMAC secret; a random one is generated if unset
+ */
+export interface FaucetIpLimiterOptions {
+  windowMs?: number;
+  max?: number;
+  secret?: string;
+}
+
+interface FaucetIpEntry {
+  count: number;
+  resetAt: number;
+}
+
+export class FaucetIpLimiter {
+  private readonly windowMs: number;
+  private readonly max: number;
+  private readonly secret: string;
+  private readonly store = new Map<string, FaucetIpEntry>();
+
+  constructor(opts: FaucetIpLimiterOptions = {}) {
+    this.windowMs = opts.windowMs ?? Number(process.env.FAUCET_IP_COOLDOWN_MS ?? 86_400_000);
+    this.max = opts.max ?? Number(process.env.FAUCET_IP_MAX ?? 1);
+    this.secret = opts.secret ?? process.env.FAUCET_IP_HASH_SECRET ?? randomBytes(32).toString('hex');
+  }
+
+  /** Hash an IP with a salted HMAC-SHA256 so plaintext is never stored. */
+  hashIp(ip: string): string {
+    return createHmac('sha256', this.secret).update(ip).digest('hex');
+  }
+
+  /**
+   * Check whether a claim from `ip` is allowed.
+   * Returns `{ allowed, retryAfterSecs }`; `allowed` is `false` when the IP
+   * has exceeded the per-window claim limit.
+   */
+  check(ip: string, now: number = Date.now()): { allowed: boolean; retryAfterSecs: number } {
+    const key = this.hashIp(ip);
+    let entry = this.store.get(key);
+
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 1, resetAt: now + this.windowMs };
+      this.store.set(key, entry);
+      return { allowed: true, retryAfterSecs: 0 };
+    }
+
+    if (entry.count >= this.max) {
+      const retryAfterSecs = Math.ceil((entry.resetAt - now) / 1_000);
+      return { allowed: false, retryAfterSecs };
+    }
+
+    entry.count += 1;
+    return { allowed: true, retryAfterSecs: 0 };
+  }
+
+  /** Periodically clean up expired entries to avoid unbounded memory growth. */
+  startCleanup(intervalMs = 5 * 60_000): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.store) {
+        if (now > entry.resetAt) this.store.delete(key);
+      }
+    }, intervalMs);
+  }
+}
+
 /** Extract the real client IP from the request, respecting X-Forwarded-For. */
 export function getClientIp(req: IncomingMessage): string {
   const forwarded = req.headers['x-forwarded-for'];
@@ -87,10 +160,13 @@ export function applyRateLimit(
   const { allowed, retryAfterSecs } = limiter.check(ip);
 
   if (!allowed) {
-    res.setHeader('Content-Type', 'application/json');
     res.setHeader('Retry-After', String(retryAfterSecs));
-    res.writeHead(429);
-    res.end(JSON.stringify({ error: 'Too Many Requests', retryAfter: retryAfterSecs }));
+    sendProblem(res, req, {
+      type: PROBLEM_TYPES.tooManyRequests,
+      title: 'Too Many Requests',
+      status: 429,
+      detail: `Retry after ${retryAfterSecs} seconds.`,
+    });
     return true;
   }
 

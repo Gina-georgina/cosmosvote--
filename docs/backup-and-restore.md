@@ -97,6 +97,31 @@ If the admin private key is lost and you have a multisig setup:
 1. Use the multisig recovery procedure in [`docs/admin-multisig-pattern.md`](./admin-multisig-pattern.md).
 2. If no multisig is configured, the contract admin is permanently locked — redeploy.
 
+## Faucet Database (SQLite WAL Mode)
+
+The faucet service stores its state in a SQLite database that runs in **WAL (Write-Ahead Logging) mode**. In WAL mode, committed transactions are first appended to a `-wal` sidecar file and only later merged back into the main database file during a *checkpoint*.
+
+To keep the WAL from growing unboundedly across crashes or container restarts, the faucet performs a checkpoint in two situations:
+
+| Trigger | Behaviour |
+|---------|-----------|
+| Graceful shutdown (SIGINT/SIGTERM) | `PRAGMA wal_checkpoint(TRUNCATE)` is executed before the process exits, flushing the WAL into the main DB file and truncating the `-wal` file to zero bytes |
+| WAL grows beyond 1 000 pages | A checkpoint is triggered automatically so the WAL does not grow without bound during long-running operation |
+
+### Implications for Backups
+
+- **Preferred: checkpoint, then copy.** Stop the faucet gracefully (or otherwise ensure a checkpoint has run) so the `-wal` file is truncated, then copy only the main database file. This yields a single, self-contained snapshot.
+- **Copying a live database:** if you cannot stop the faucet, you must copy the database file **together with** its `-wal` and `-shm` sidecar files (e.g. `faucet.db`, `faucet.db-wal`, `faucet.db-shm`). Copying only the main file while the WAL contains unmerged transactions will produce an inconsistent or stale backup.
+- **Restoring:** place the main database file and any `-wal`/`-shm` files back in the same directory. SQLite will replay the WAL on the next open and checkpoint it automatically.
+
+```bash
+# Safe backup of a stopped faucet (WAL already truncated)
+cp faucet.db backups/faucet-$(date +%Y%m%d).db
+
+# Backup of a live faucet: include WAL sidecars
+cp faucet.db faucet.db-wal faucet.db-shm backups/
+```
+
 ## Recommended Tooling
 
 | Tool | Purpose |

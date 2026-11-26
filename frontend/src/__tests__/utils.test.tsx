@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { formatTokenAmount, sanitizeWalletMessage } from '../utils';
 
 describe('formatTokenAmount', () => {
@@ -88,5 +89,94 @@ describe('sanitizeWalletMessage', () => {
 
   it('returns an empty string for empty input', () => {
     expect(sanitizeWalletMessage('')).toBe('');
+  });
+});
+
+// --- Memoisation tests for proposal filter/sort (issue #389) ---
+
+type Proposal = { id: number; title: string; status: string };
+
+const PROPOSALS: Proposal[] = [
+  { id: 1, title: 'Alpha upgrade', status: 'active' },
+  { id: 2, title: 'Beta treasury', status: 'passed' },
+  { id: 3, title: 'Gamma upgrade', status: 'active' },
+  { id: 4, title: 'Delta audit', status: 'rejected' },
+];
+
+// Spy on the filter/sort computation so we can assert how often it runs.
+const filterSpy = vi.fn((proposals: Proposal[], filter: string) =>
+  filter === 'all' ? proposals : proposals.filter((p) => p.status === filter),
+);
+
+// Minimal harness mirroring the list view: filter + sort wrapped in useMemo.
+function ProposalListHarness() {
+  const React = require('react') as typeof import('react');
+  const [filter, setFilter] = React.useState('all');
+  const [tick, setTick] = React.useState(0);
+
+  const visible = React.useMemo(() => {
+    const filtered = filterSpy(PROPOSALS, filter);
+    return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+  }, [filter]);
+
+  return (
+    <div>
+      <span data-testid="tick">{tick}</span>
+      <button onClick={() => setTick((t) => t + 1)}>poll</button>
+      <button onClick={() => setFilter('active')}>filter-active</button>
+      <button onClick={() => setFilter('passed')}>filter-passed</button>
+      <ul>
+        {visible.map((p) => (
+          <li key={p.id} data-testid="proposal">
+            {p.title}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+describe('proposal list memoisation', () => {
+  beforeEach(() => {
+    filterSpy.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('does not recompute filter/sort on unrelated state changes', () => {
+    render(<ProposalListHarness />);
+    expect(filterSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fireEvent.click(screen.getByText('poll'));
+      fireEvent.click(screen.getByText('poll'));
+    });
+
+    expect(screen.getByTestId('tick').textContent).toBe('2');
+    // Unrelated polling updates must not re-run the memoised computation.
+    expect(filterSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('recomputes and does not go stale when the filter changes', () => {
+    render(<ProposalListHarness />);
+    expect(screen.getAllByTestId('proposal')).toHaveLength(4);
+
+    act(() => {
+      fireEvent.click(screen.getByText('filter-active'));
+    });
+
+    expect(filterSpy).toHaveBeenCalledTimes(2);
+    const activeTitles = screen.getAllByTestId('proposal').map((el) => el.textContent);
+    expect(activeTitles).toEqual(['Alpha upgrade', 'Gamma upgrade']);
+
+    act(() => {
+      fireEvent.click(screen.getByText('filter-passed'));
+    });
+
+    expect(filterSpy).toHaveBeenCalledTimes(3);
+    const passedTitles = screen.getAllByTestId('proposal').map((el) => el.textContent);
+    expect(passedTitles).toEqual(['Beta treasury']);
   });
 });

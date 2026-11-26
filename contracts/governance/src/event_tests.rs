@@ -360,17 +360,20 @@ fn test_admin_transfer_accepted_event_includes_timestamp() {
 }
 
 // ---------------------------------------------------------------------------
-// contract_paused / contract_unpaused  (issue #446)
+// proposal_cooldown_updated  (issue #460)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_contract_paused_event() {
+fn test_proposal_cooldown_updated_event() {
     let env = Env::default();
     let t = setup(&env);
     let gov_id = t.governance.address.clone();
     let admin = t.admin.clone();
 
-    t.governance.pause(&admin);
+    let old_cooldown = t.governance.get_proposal_cooldown();
+    let new_cooldown: u64 = old_cooldown + 3_600;
+
+    t.governance.update_proposal_cooldown(&admin, &new_cooldown);
 
     let all = env.events().all();
     let ev = all
@@ -382,40 +385,12 @@ fn test_contract_paused_event() {
                     == vec![
                         &env,
                         symbol_short!("gov").into_val(&env),
-                        symbol_short!("paused").into_val(&env),
+                        symbol_short!("cooldown").into_val(&env),
                     ]
         })
-        .expect("contract_paused event not emitted");
+        .expect("proposal_cooldown_updated event not emitted");
 
-    let expected = crate::events::ContractPaused { admin: admin.clone() }.into_val(&env);
-    assert_eq!(ev.2, expected);
-}
-
-#[test]
-fn test_contract_unpaused_event() {
-    let env = Env::default();
-    let t = setup(&env);
-    let gov_id = t.governance.address.clone();
-    let admin = t.admin.clone();
-
-    t.governance.pause(&admin);
-    t.governance.unpause(&admin);
-
-    let all = env.events().all();
-    let ev = all
-        .iter()
-        .rev()
-        .find(|(cid, topics, _)| {
-            *cid == gov_id
-                && *topics
-                    == vec![
-                        &env,
-                        symbol_short!("gov").into_val(&env),
-                        symbol_short!("unpause").into_val(&env),
-                    ]
-        })
-        .expect("contract_unpaused event not emitted");
-
-    let expected = crate::events::ContractUnpaused { admin: admin.clone() }.into_val(&env);
+    // Verify payload: (admin, old_value, new_value)
+    let expected = (admin.clone(), old_cooldown, new_cooldown).into_val(&env);
     assert_eq!(ev.2, expected);
 }

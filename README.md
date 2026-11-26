@@ -667,6 +667,18 @@ The Dockerfile uses a **multi-stage build** to keep the final image small and fr
 
 Both base images are pinned to a specific digest for reproducible builds.
 
+**Platform support:** Published Docker images are multi-architecture and support both `linux/amd64` and `linux/arm64`, so Apple Silicon (M-series) machines run the image natively without emulation. The CI pipeline builds and tests both architectures and pushes a multi-arch manifest to the container registry.
+
+**Build a multi-arch image locally** (requires Docker Buildx; use `--push` or `--load` to store the result):
+
+```bash
+# Build for both architectures and push a multi-arch manifest
+docker buildx build --platform linux/amd64,linux/arm64 --target runtime -t cosmosvote:latest --push .
+
+# Build for a single architecture and load it into the local Docker daemon
+docker buildx build --platform linux/arm64 --target runtime -t cosmosvote:latest --load .
+```
+
 **Build the runtime image** (WASM artifacts only):
 
 ```bash

@@ -4,6 +4,7 @@
  */
 
 import axios from 'axios';
+import { createHmac } from 'crypto';
 import { NotificationService, WebhookPayload } from '../src/notificationService';
 
 jest.mock('axios');
@@ -116,6 +117,44 @@ describe('deliverWebhook', () => {
       expect.objectContaining({ event: 'vote_cast' }),
       expect.objectContaining({ timeout: 5_000 })
     );
+  });
+
+  it('sends an HMAC-SHA256 signature header over the raw JSON body', async () => {
+    mockedAxios.post.mockResolvedValueOnce({ status: 200 });
+
+    const secret = 'test-webhook-secret';
+    const svc = new NotificationService({ ...BASE_CONFIG, webhookSecret: secret });
+    const event = makeEvent();
+    await svc.deliverWebhook(event);
+
+    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+    const [url, body, config] = mockedAxios.post.mock.calls[0];
+    expect(url).toBe(BASE_CONFIG.webhookUrl);
+
+    // Body must be the raw JSON string so recipients can verify it byte-for-byte.
+    expect(typeof body).toBe('string');
+    const rawBody = body as string;
+    expect(JSON.parse(rawBody)).toEqual(event);
+
+    const expectedSignature = createHmac('sha256', secret).update(rawBody).digest('hex');
+    expect(config).toEqual(
+      expect.objectContaining({
+        timeout: 5_000,
+        headers: expect.objectContaining({ 'X-CosmosVote-Signature': expectedSignature }),
+      })
+    );
+  });
+
+  it('omits the signature header when no webhook secret is configured', async () => {
+    mockedAxios.post.mockResolvedValueOnce({ status: 200 });
+
+    const svc = new NotificationService(BASE_CONFIG);
+    await svc.deliverWebhook(makeEvent());
+
+    const [, body, config] = mockedAxios.post.mock.calls[0];
+    expect(typeof body).toBe('string');
+    const headers = (config as { headers?: Record<string, string> }).headers ?? {};
+    expect(headers['X-CosmosVote-Signature']).toBeUndefined();
   });
 
   it('does not throw when webhook delivery fails', async () => {
