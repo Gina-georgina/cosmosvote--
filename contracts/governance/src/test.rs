@@ -757,6 +757,60 @@ fn test_change_vote_same_vote_fails() {
     assert_eq!(result, Err(Ok(ContractError::VoteAlreadySame)));
 }
 
+/// Issue #468: casting the same vote value twice must fail with `VoteAlreadySame`
+/// (error 29) rather than silently succeeding or double-counting weight.
+#[test]
+fn test_cast_vote_same_value_twice_fails_with_vote_already_same() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+
+    // Re-casting the identical vote value is rejected with VoteAlreadySame.
+    let result = gov.try_cast_vote(&voter, &id, &Vote::Yes);
+    assert_eq!(result, Err(Ok(ContractError::VoteAlreadySame)));
+
+    // Tallies are unchanged — the duplicate vote was not counted.
+    let proposal = gov.get_proposal(&id);
+    assert_eq!(proposal.votes_yes, 10_000_000);
+    assert_eq!(proposal.votes_no, 0);
+    assert_eq!(proposal.votes_abstain, 0);
+    assert_eq!(proposal.voter_count, 1);
+}
+
+/// Issue #468: vote changes are NOT supported. Attempting to change an existing
+/// vote to a different value is rejected with `VoteAlreadySame` (error 29);
+/// voters must retract their vote first and then cast a new one.
+#[test]
+fn test_cast_vote_change_to_different_value_fails_with_vote_already_same() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+    let id = make_proposal(&gov, &env, &voter);
+
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+
+    // Changing Yes -> No is not supported.
+    let result = gov.try_cast_vote(&voter, &id, &Vote::No);
+    assert_eq!(result, Err(Ok(ContractError::VoteAlreadySame)));
+
+    // Original vote and tallies remain intact.
+    let record = gov.get_vote(&id, &voter);
+    assert_eq!(record.vote, Vote::Yes);
+    let proposal = gov.get_proposal(&id);
+    assert_eq!(proposal.votes_yes, 10_000_000);
+    assert_eq!(proposal.votes_no, 0);
+
+    // The supported path is retract-then-revote.
+    gov.retract_vote(&voter, &id);
+    gov.cast_vote(&voter, &id, &Vote::No);
+    let record = gov.get_vote(&id, &voter);
+    assert_eq!(record.vote, Vote::No);
+    let proposal = gov.get_proposal(&id);
+    assert_eq!(proposal.votes_yes, 0);
+    assert_eq!(proposal.votes_no, 10_000_000);
+}
+
 #[test]
 fn test_change_vote_not_voted_fails() {
     let env = Env::default();

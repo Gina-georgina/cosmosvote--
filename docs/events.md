@@ -11,6 +11,8 @@ Soroban events are published via `env.events().publish(topics, data)`.
 - **Addresses** — `ScVal::Address` (Stellar `G…` or contract `C…` strkey).
 - **Integers** — `i128` encoded as `ScVal::I128`, `u64` as `ScVal::U64`, `u32` as `ScVal::U32`.
 - **Strings** — `ScVal::String`.
+- **Optionals** — `ScVal::Void` for `None`, otherwise the inner value encoded as usual (e.g. `Some("text")` → `ScVal::String`, `Some(123)` → `ScVal::U32`).
+- **Booleans** — `ScVal::Bool`.
 - **Enums** — `ScVal::Vec` with a single `ScVal::Symbol` discriminant (e.g., `["Yes"]`).
 
 ---
@@ -153,12 +155,23 @@ Emitted when the admin cancels an active proposal.
 | proposal_id | 0 | u64 | Cancelled proposal ID |
 | admin | 1 | Address | Admin that cancelled |
 | voter_count | 2 | u32 | Number of votes cast at time of cancellation |
-| reason | 3 | String | Cancellation reason (empty string if none provided) |
+| reason | 3 | Option\<String\> | Cancellation reason; `None` encodes as `ScVal::Void`, `Some(s)` as `ScVal::String` |
+
+The `reason` field is always present in the payload. When no reason was supplied
+to `cancel()`, it is encoded as `ScVal::Void` (JSON `null`). Off-chain indexers
+should treat `null` as "no reason provided".
 
 ```json
 {
   "topics": ["gov", "cancel"],
   "data": [1, "GABC...ADMIN", 42, "Duplicate proposal"]
+}
+```
+
+```json
+{
+  "topics": ["gov", "cancel"],
+  "data": [2, "GABC...ADMIN", 0, null]
 }
 ```
 
@@ -183,6 +196,32 @@ Emitted when the quorum threshold for a proposal is changed.
 {
   "topics": ["gov", "quorum"],
   "data": [1, 1000000, 2000000]
+}
+```
+
+---
+
+### `restrict_admin_vote_updated`
+
+Emitted when the admin changes the `restrict_admin_vote` policy via
+`set_restrict_admin_vote(admin, value)`. The flag controls whether the admin
+address is permitted to cast votes.
+
+| Field | Topic index | Type | Description |
+|-------|-------------|------|-------------|
+| contract_tag | 0 | Symbol | `"gov"` |
+| event_tag | 1 | Symbol | `"restrict"` |
+
+| Field | Data index | Type | Description |
+|-------|------------|------|-------------|
+| admin | 0 | Address | Admin that updated the flag |
+| old_value | 1 | bool | Previous value of `restrict_admin_vote` |
+| new_value | 2 | bool | New value of `restrict_admin_vote` |
+
+```json
+{
+  "topics": ["gov", "restrict"],
+  "data": ["GABC...ADMIN", false, true]
 }
 ```
 
@@ -415,7 +454,7 @@ Emitted on every token transfer (including `transfer_from`).
 
 ### `approval`
 
-Emitted when a spender allowance is set.
+Emitted when a spender allowance is set via `approve(owner, spender, amount, expiry_ledger)`.
 
 | Field | Topic index | Type | Description |
 |-------|-------------|------|-------------|
@@ -427,11 +466,24 @@ Emitted when a spender allowance is set.
 | owner | 0 | Address | Token owner granting allowance |
 | spender | 1 | Address | Approved spender |
 | amount | 2 | i128 | Approved amount |
+| expiry_ledger | 3 | Option\<u32\> | Ledger sequence at which the allowance expires; `None` encodes as `ScVal::Void`, `Some(n)` as `ScVal::U32` |
+
+The `expiry_ledger` field is always present in the payload. When no expiry was
+supplied, it is encoded as `ScVal::Void` (JSON `null`), meaning the allowance
+does not expire. Once `env.ledger().sequence()` reaches `expiry_ledger`, the
+allowance is treated as zero by `transfer_from`.
 
 ```json
 {
   "topics": ["token", "approve"],
-  "data": ["GABC...OWNER", "GABC...SPENDER", 100000]
+  "data": ["GABC...OWNER", "GABC...SPENDER", 100000, 1234567]
+}
+```
+
+```json
+{
+  "topics": ["token", "approve"],
+  "data": ["GABC...OWNER", "GABC...SPENDER", 100000, null]
 }
 ```
 
@@ -517,8 +569,9 @@ Emitted when the token admin is changed.
 | gov | vote_cast | `gov`, `voted` | proposal_id, voter, vote, weight |
 | gov | proposal_finalized | `gov`, `final` | proposal_id, state |
 | gov | proposal_executed | `gov`, `exec` | proposal_id, admin |
-| gov | proposal_cancelled | `gov`, `cancel` | proposal_id, admin, voter_count, reason |
+| gov | proposal_cancelled | `gov`, `cancel` | proposal_id, admin, voter_count, reason (Option\<String\>) |
 | gov | quorum_updated | `gov`, `quorum` | proposal_id, old_quorum, new_quorum |
+| gov | restrict_admin_vote_updated | `gov`, `restrict` | admin, old_value, new_value |
 | gov | admin_transfer_proposed | `gov`, `propose` | current_admin, pending_admin, timestamp |
 | gov | admin_transfer_accepted | `gov`, `accept` | previous_admin, new_admin, timestamp |
 | gov | admin_transferred | `gov`, `admin` | old_admin, new_admin |
@@ -528,7 +581,7 @@ Emitted when the token admin is changed.
 | treasury | disbursed | `treasury`, `disbursed` | recipient, amount, asset, proposal_id |
 | token | initialized | `token`, `init` | admin, supply |
 | token | transfer | `token`, `xfer` | from, to, amount |
-| token | approval | `token`, `approve` | owner, spender, amount |
+| token | approval | `token`, `approve` | owner, spender, amount, expiry_ledger (Option\<u32\>) |
 | token | minted | `token`, `mint` | admin, to, amount |
 | token | burned | `token`, `burn` | admin, from, amount |
 | token | admin_transferred | `token`, `admin` | old_admin, new_admin |

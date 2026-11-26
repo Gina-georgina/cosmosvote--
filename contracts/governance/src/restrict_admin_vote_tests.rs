@@ -189,3 +189,121 @@ fn test_admin_vote_restricted_event_emitted() {
         "adm_blk event payload should be (proposal_id, admin, proposer)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #463: set_restrict_admin_vote
+// ---------------------------------------------------------------------------
+
+/// Finds the `RestrictAdminVoteUpdated` event emitted by the governance
+/// contract and returns its payload.
+fn find_restrict_admin_vote_updated_event(
+    t: &TestEnv,
+) -> Option<(bool, bool)> {
+    let gov_id = t.gov.address.clone();
+    t.env
+        .events()
+        .all()
+        .iter()
+        .find(|(cid, topics, _)| {
+            *cid == gov_id
+                && *topics
+                    == vec![
+                        t.env,
+                        symbol_short!("gov").into_val(t.env),
+                        symbol_short!("radm_vt").into_val(t.env),
+                    ]
+        })
+        .map(|(_, _, data)| data.into_val(t.env))
+}
+
+/// true → false: admin can lift the restriction and the event reports the
+/// old/new values.
+#[test]
+fn test_set_restrict_admin_vote_true_to_false() {
+    let env = Env::default();
+    let t = setup_with_flag(&env, true);
+
+    assert!(
+        t.gov.get_config().restrict_admin_vote,
+        "flag should start as true"
+    );
+
+    t.gov.set_restrict_admin_vote(&t.admin, &false);
+
+    assert!(
+        !t.gov.get_config().restrict_admin_vote,
+        "flag should be false after update"
+    );
+
+    let payload = find_restrict_admin_vote_updated_event(&t)
+        .expect("RestrictAdminVoteUpdated event should be emitted");
+    assert_eq!(
+        payload,
+        (true, false),
+        "event payload should be (old_value, new_value) = (true, false)"
+    );
+
+    // Behaviour follows the new flag: admin may now vote on own proposal.
+    let proposal_id = create_proposal_by(&t, &t.admin.clone());
+    t.gov.cast_vote(&t.admin, &proposal_id, &Vote::Yes);
+    assert!(
+        t.gov.has_voted(&proposal_id, &t.admin),
+        "admin should be able to vote on own proposal after lifting the restriction"
+    );
+}
+
+/// false → true: admin can enable the restriction and the event reports the
+/// old/new values.
+#[test]
+fn test_set_restrict_admin_vote_false_to_true() {
+    let env = Env::default();
+    let t = setup_with_flag(&env, false);
+
+    assert!(
+        !t.gov.get_config().restrict_admin_vote,
+        "flag should start as false"
+    );
+
+    t.gov.set_restrict_admin_vote(&t.admin, &true);
+
+    assert!(
+        t.gov.get_config().restrict_admin_vote,
+        "flag should be true after update"
+    );
+
+    let payload = find_restrict_admin_vote_updated_event(&t)
+        .expect("RestrictAdminVoteUpdated event should be emitted");
+    assert_eq!(
+        payload,
+        (false, true),
+        "event payload should be (old_value, new_value) = (false, true)"
+    );
+
+    // Behaviour follows the new flag: admin is now blocked on own proposal.
+    let proposal_id = create_proposal_by(&t, &t.admin.clone());
+    let result = t.gov.try_cast_vote(&t.admin, &proposal_id, &Vote::Yes);
+    assert_eq!(
+        result,
+        Err(Ok(ContractError::AdminVoteRestricted)),
+        "admin should be blocked from voting on own proposal after enabling the restriction"
+    );
+}
+
+/// A non-admin caller must be rejected with `NotAdmin`.
+#[test]
+fn test_set_restrict_admin_vote_non_admin_rejected() {
+    let env = Env::default();
+    let t = setup_with_flag(&env, false);
+
+    let result = t.gov.try_set_restrict_admin_vote(&t.voter, &true);
+    assert_eq!(
+        result,
+        Err(Ok(ContractError::NotAdmin)),
+        "non-admin caller should be rejected with NotAdmin"
+    );
+
+    assert!(
+        !t.gov.get_config().restrict_admin_vote,
+        "flag should be unchanged after a rejected update"
+    );
+}

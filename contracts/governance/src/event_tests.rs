@@ -247,6 +247,10 @@ fn test_proposal_cancelled_event_no_reason() {
     // reason field should be empty string when None is passed
     let expected_reason = soroban_sdk::String::from_str(&env, "");
     assert_eq!(ev.2, (id, admin.clone(), 0u32, expected_reason).into_val(&env));
+
+    // verify the reason is not stored on the proposal when None is passed
+    let proposal = t.governance.get_proposal(&id);
+    assert_eq!(proposal.cancellation_reason, None);
 }
 
 #[test]

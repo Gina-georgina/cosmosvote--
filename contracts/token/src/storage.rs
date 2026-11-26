@@ -189,16 +189,24 @@ impl TokenStorage {
         let key = TempKey::Allowance(owner.clone(), spender.clone());
         if let Some(data) = env.storage().temporary().get::<TempKey, Allowance>(&key) {
             let current_ledger = env.ledger().sequence();
+            // Expired or exhausted allowances are treated as zero balance.
+            // Remove the stale entry so it doesn't linger in temporary storage.
             if current_ledger > data.expiry_ledger || data.amount <= 0 {
+                env.storage().temporary().remove(&key);
                 return None;
             }
-            env.storage().temporary().set(&key, &data);
             Some(data)
         } else {
             None
         }
     }
 
+    /// Store an allowance for `(owner, spender)` with an explicit expiry ledger.
+    ///
+    /// `expiry_ledger` is the resolved absolute ledger sequence at which the
+    /// allowance stops being valid (the allowance is expired once
+    /// `env.ledger().sequence() > expiry_ledger`). Callers in `lib.rs` are
+    /// responsible for resolving any relative expiry into an absolute ledger.
     pub fn set_allowance(
         env: &Env,
         owner: &Address,
@@ -206,15 +214,23 @@ impl TokenStorage {
         amount: i128,
         expiry_ledger: u32,
     ) {
-        env.storage()
-            .temporary()
-            .set(
-                &TempKey::Allowance(owner.clone(), spender.clone()),
-                &Allowance {
-                    amount,
-                    expiry_ledger,
-                },
-            );
+        let key = TempKey::Allowance(owner.clone(), spender.clone());
+        env.storage().temporary().set(
+            &key,
+            &Allowance {
+                amount,
+                expiry_ledger,
+            },
+        );
+        // Keep the entry alive at least until its expiry ledger so that the
+        // expiry check in `allowance_record` is meaningful.
+        let current_ledger = env.ledger().sequence();
+        if expiry_ledger > current_ledger {
+            let ttl = expiry_ledger - current_ledger;
+            env.storage()
+                .temporary()
+                .extend_ttl(&key, ttl, ttl);
+        }
     }
 
     /// Returns the delegate address for `owner`, if any.
