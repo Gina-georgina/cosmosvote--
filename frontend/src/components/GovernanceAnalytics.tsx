@@ -367,3 +367,5 @@ export function GovernanceAnalytics({ proposals, decimals, votedMap, onRefresh }
     </section>
   );
 }
+
+export default GovernanceAnalytics;

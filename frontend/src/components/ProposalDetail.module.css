@@ -232,3 +232,96 @@
     font-size: var(--font-size-md);
   }
 }
+
+/* ── Print ── */
+@media print {
+  /* Hide interactive / non-essential UI */
+  .noPrint,
+  .closeBtn,
+  .voteControls,
+  .voteBtn {
+    display: none !important;
+  }
+
+  /* Flatten the modal overlay so the dialog prints as a normal document */
+  .overlay {
+    position: static;
+    inset: auto;
+    background: none;
+    padding: 0;
+    display: block;
+    z-index: auto;
+  }
+
+  .dialog {
+    background: #fff;
+    color: #000;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    max-width: 100%;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* Force black text on white for clean printing */
+  .dialog,
+  .dialog * {
+    color: #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Remove decorative backgrounds/borders on vote boxes and status */
+  .voteBox,
+  .voteStatus {
+    background: none !important;
+    border: 1px solid #000;
+    border-radius: 0;
+  }
+
+  /* Ensure title, description, tallies and timestamps print fully */
+  .proposalTitle,
+  .description,
+  .voteLabel,
+  .voteCount,
+  .table td {
+    overflow: visible !important;
+    max-height: none !important;
+    word-break: break-word;
+    white-space: normal;
+  }
+
+  .proposalTitle {
+    font-size: 18pt;
+    margin-bottom: 8pt;
+  }
+
+  .description {
+    font-size: 11pt;
+    margin-bottom: 10pt;
+  }
+
+  .table {
+    page-break-inside: avoid;
+  }
+
+  .table td {
+    border-bottom: 1px solid #000;
+  }
+
+  .voteGrid {
+    page-break-inside: avoid;
+  }
+
+  /* Avoid awkward breaks in the middle of key content */
+  .dialogHeader,
+  .proposalTitle,
+  .description {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}

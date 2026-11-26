@@ -22,41 +22,48 @@ const envSchema = z.object({
 
   APP_VERSION: z.string().optional(),
 
+  // ── Build metadata (injected at build time) ───────────────────────────────
+  VERSION: z.string().default('unknown'),
+
+  COMMIT_SHA: z.string().default('unknown'),
+
+  BUILD_DATE: z.string().default('unknown'),
+
   // ── Stellar / contract ────────────────────────────────────────────────────
   STELLAR_RPC_URL: z.string().url().default('http://localhost:8000'),
 
   GOVERNANCE_CONTRACT_ID: z.string().min(1, 'GOVERNANCE_CONTRACT_ID is required'),
 
-  // Optional: empty/omitted disables webhook delivery. When set it must be a
-  // valid HTTPS URL.
-  WEBHOOK_URL: z
+  TOKEN_CONTRACT_ID: z.string().min(1).optional(),
+
+  ALLOWED_CONTRACT_IDS: z
     .string()
     .optional()
-    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim()))
-    .refine(
-      (v) => {
-        if (v === undefined) return true;
-        try {
-          return new URL(v).protocol === 'https:';
-        } catch {
-          return false;
-        }
-      },
-      'WEBHOOK_URL must be a valid HTTPS URL (or empty to disable webhooks)',
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : [],
     ),
 
-  // Optional bearer token protecting /admin/* endpoints. When unset, admin
-  // endpoints reject all requests.
-  ADMIN_TOKEN: z
-    .string()
-    .optional()
-    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim())),
+  WEBHOOK_URL: z.string().url('WEBHOOK_URL must be a valid URL'),
 
   POLL_INTERVAL_MS: z
     .string()
     .optional()
     .transform((v) => (v ? Number(v) : 6_000))
     .refine((n) => Number.isInteger(n) && n > 0, 'POLL_INTERVAL_MS must be a positive integer'),
+
+  HORIZON_MAX_RETRIES: z
+    .string()
+    .optional()
+    .transform((v) => (v ? Number(v) : 5))
+    .refine(
+      (n) => Number.isInteger(n) && n > 0,
+      'HORIZON_MAX_RETRIES must be a positive integer',
+    ),
 
   // ── Health server ─────────────────────────────────────────────────────────
   HEALTH_PORT: z
@@ -76,9 +83,72 @@ const envSchema = z.object({
     .string()
     .min(1, 'AUDIT_LOG_PATH must not be empty')
     .default('./data/audit.log'),
+
+  // ── Faucet ────────────────────────────────────────────────────────────────
+  FAUCET_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false'),
+
+  // Path to a file containing the faucet signing keypair secret.
+  FAUCET_SECRET_KEY_FILE: z.string().min(1).optional(),
+
+  // AWS Secrets Manager secret id/ARN holding the faucet signing keypair.
+  FAUCET_SECRET_KEY_AWS_SECRET_ID: z.string().min(1).optional(),
+
+  // Deprecated: raw secret in env var, supported for local dev only.
+  FAUCET_SECRET_KEY: z.string().optional(),
+}).superRefine((env, ctx) => {
+  if (env.FAUCET_ENABLED !== 'true') return;
+
+  const sources = [
+    env.FAUCET_SECRET_KEY_FILE,
+    env.FAUCET_SECRET_KEY_AWS_SECRET_ID,
+    env.FAUCET_SECRET_KEY,
+  ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+  if (sources.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FAUCET_SECRET_KEY_FILE'],
+      message:
+        'FAUCET_ENABLED is true but no faucet secret source is configured. ' +
+        'Set exactly one of FAUCET_SECRET_KEY_FILE, FAUCET_SECRET_KEY_AWS_SECRET_ID, ' +
+        'or FAUCET_SECRET_KEY (deprecated, local dev only).',
+    });
+  } else if (sources.length > 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FAUCET_SECRET_KEY_FILE'],
+      message:
+        'Multiple faucet secret sources are configured. ' +
+        'Set exactly one of FAUCET_SECRET_KEY_FILE, FAUCET_SECRET_KEY_AWS_SECRET_ID, ' +
+        'or FAUCET_SECRET_KEY (deprecated, local dev only).',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+/**
+ * Build the set of contract IDs that subscriptions may target.
+ *
+ * Always includes GOVERNANCE_CONTRACT_ID, plus TOKEN_CONTRACT_ID (if set)
+ * and any additional IDs listed in ALLOWED_CONTRACT_IDS.
+ */
+export function getAllowedContractIds(env: Env): Set<string> {
+  const ids = new Set<string>([env.GOVERNANCE_CONTRACT_ID]);
+
+  if (env.TOKEN_CONTRACT_ID) {
+    ids.add(env.TOKEN_CONTRACT_ID);
+  }
+
+  for (const id of env.ALLOWED_CONTRACT_IDS) {
+    ids.add(id);
+  }
+
+  return ids;
+}
 
 /**
  * Validate process.env against the schema.

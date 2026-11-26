@@ -7,7 +7,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { createHmac, randomBytes } from 'crypto';
+import { sendProblem, PROBLEM_TYPES } from './problemJson';
 
 export interface RateLimiterOptions {
   windowMs?: number;
@@ -160,10 +160,13 @@ export function applyRateLimit(
   const { allowed, retryAfterSecs } = limiter.check(ip);
 
   if (!allowed) {
-    res.setHeader('Content-Type', 'application/json');
     res.setHeader('Retry-After', String(retryAfterSecs));
-    res.writeHead(429);
-    res.end(JSON.stringify({ error: 'Too Many Requests', retryAfter: retryAfterSecs }));
+    sendProblem(res, req, {
+      type: PROBLEM_TYPES.tooManyRequests,
+      title: 'Too Many Requests',
+      status: 429,
+      detail: `Retry after ${retryAfterSecs} seconds.`,
+    });
     return true;
   }
 

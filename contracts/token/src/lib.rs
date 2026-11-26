@@ -11,6 +11,7 @@ mod types;
 
 #[cfg(test)]
 mod test;
+mod prop_tests;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -287,6 +288,47 @@ impl TokenContract {
         TokenStorage::set_balance(&env, &owner, bal - amount);
 
         TokenEvents::burned(&env, &owner, &owner, amount);
+        Ok(())
+    }
+
+    /// Burn tokens from `from` on behalf of an approved `spender`, consuming
+    /// the spender's allowance. Mirrors the `transfer_from` authorization
+    /// model so protocols can burn tokens they were approved to move.
+    pub fn burn_from(
+        env: Env,
+        spender: Address,
+        from: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        spender.require_auth();
+        Self::assert_not_paused(&env)?;
+        Self::validate_amount(amount)?;
+
+        let allowance_record = TokenStorage::allowance_record(&env, &from, &spender)
+            .ok_or(ContractError::AllowanceExceeded)?;
+        if allowance_record.amount < amount {
+            return Err(ContractError::AllowanceExceeded);
+        }
+
+        let from_bal = TokenStorage::balance(&env, &from);
+        if from_bal < amount {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        let remaining = allowance_record.amount - amount;
+        TokenStorage::set_allowance(
+            &env,
+            &from,
+            &spender,
+            remaining,
+            allowance_record.expiry_ledger,
+        );
+
+        let supply = TokenStorage::total_supply(&env);
+        TokenStorage::set_total_supply(&env, supply - amount);
+        TokenStorage::set_balance(&env, &from, from_bal - amount);
+
+        TokenEvents::burned(&env, &spender, &from, amount);
         Ok(())
     }
 

@@ -3,9 +3,9 @@ import { initErrorTracking, flushErrorTracking } from './errorTracking';
 import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
+import { requestContext } from './requestContext';
 import helmet from 'helmet';
-import crypto from 'crypto';
-import type { IncomingMessage, ServerResponse } from 'http';
+import compression from 'compression';
 
 // Validate env vars before anything else — fails fast with a clear message.
 const env = loadEnv();
@@ -35,79 +35,40 @@ const securityHeaders = helmet({
   referrerPolicy: { policy: 'strict-origin' },
 });
 
-// Admin bearer-token authentication.
-// Compares the presented token against ADMIN_TOKEN using a constant-time
-// comparison so attackers cannot infer the token via response timing.
-export function isAdminTokenValid(
-  presented: string | undefined,
-  expected: string | undefined,
-): boolean {
-  if (!presented || !expected) return false;
-  const presentedBuf = Buffer.from(presented, 'utf8');
-  const expectedBuf = Buffer.from(expected, 'utf8');
-  // timingSafeEqual requires equal-length buffers; length mismatch is invalid.
-  if (presentedBuf.length !== expectedBuf.length) return false;
-  return crypto.timingSafeEqual(presentedBuf, expectedBuf);
-}
-
-function extractBearerToken(req: IncomingMessage): string | undefined {
-  const header = req.headers['authorization'];
-  if (typeof header !== 'string') return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match ? match[1].trim() : undefined;
-}
-
-// Express-style middleware guarding all /admin/* routes.
-export function adminAuthMiddleware(expectedToken: string | undefined) {
-  return (req: IncomingMessage, res: ServerResponse, next: () => void): void => {
-    const token = extractBearerToken(req);
-    if (!isAdminTokenValid(token, expectedToken)) {
-      res.statusCode = 401;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
-    next();
-  };
-}
-
-// Minimal router for admin endpoints. All routes require a valid bearer token.
-export function createAdminHandler(
-  expectedToken: string | undefined,
-  getDlqEntries: () => unknown[],
-) {
-  const auth = adminAuthMiddleware(expectedToken);
-  return (req: IncomingMessage, res: ServerResponse): void => {
-    auth(req, res, () => {
-      const url = req.url ?? '';
-      const path = url.split('?')[0];
-      if (req.method === 'GET' && path === '/admin/dlq') {
-        try {
-          const entries = getDlqEntries();
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ entries }));
-        } catch (err) {
-          logger.error({ event: 'admin_dlq_error', err }, 'failed to read DLQ');
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Internal Server Error' }));
-        }
-        return;
+// Response compression middleware. Negotiates gzip/brotli via the client's
+// Accept-Encoding header, only compresses bodies larger than 1 KB, and skips
+// already-compressed binary content types (images, zip, etc.).
+const compressionMiddleware = compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    const contentType = res.getHeader('Content-Type');
+    if (typeof contentType === 'string') {
+      const type = contentType.toLowerCase();
+      const alreadyCompressed = [
+        'image/',
+        'video/',
+        'audio/',
+        'application/zip',
+        'application/gzip',
+        'application/x-gzip',
+        'application/x-compress',
+        'application/x-rar-compressed',
+        'application/x-7z-compressed',
+        'application/octet-stream',
+      ];
+      if (alreadyCompressed.some((prefix) => type.startsWith(prefix))) {
+        return false;
       }
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Not Found' }));
-    });
-  };
-}
-
-const adminHandler = createAdminHandler(env.ADMIN_TOKEN, () => service.getDeadLetterEntries());
+    }
+    // Fall back to the default filter (respects Accept-Encoding, skips HEAD, etc.).
+    return compression.filter(req, res);
+  },
+});
 
 const healthServer = createHealthServer(
   () => service.checkReadiness(),
   securityHeaders,
-  adminHandler,
+  compressionMiddleware,
 );
 const healthPort = env.HEALTH_PORT;
 healthServer.listen(healthPort, '0.0.0.0', () => {
@@ -117,12 +78,37 @@ healthServer.listen(healthPort, '0.0.0.0', () => {
 service.start();
 logger.info({ event: 'startup' }, 'notification service started');
 
+// Maximum time to wait for in-flight HTTP requests to finish before forcing
+// the process to exit. Prevents a stuck connection from blocking shutdown
+// indefinitely (e.g. during a rolling deploy or container restart).
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 10000);
+
+function closeServerWithTimeout(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      logger.warn(
+        { event: 'shutdown_timeout', timeoutMs },
+        'forcing shutdown: in-flight requests did not complete in time'
+      );
+      resolve();
+    }, timeoutMs);
+
+    healthServer.close(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
-  healthServer.close();
-  service.closeDeadLetterStore();
-  await auditLogger.flush();
+  await closeServerWithTimeout(SHUTDOWN_TIMEOUT_MS);
   await flushErrorTracking();
   process.exit(0);
 }

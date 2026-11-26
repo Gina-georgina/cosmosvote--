@@ -30,3 +30,25 @@
 # 1111111111111111111111111111111111111111:docs/README.md:generic-api-key:45
 #
 # Add your verified false-positive fingerprints below this line.
+
+# ---------------------------------------------------------------------------
+# Verified false positives
+# ---------------------------------------------------------------------------
+# Each entry below has been manually reviewed and confirmed NOT to be a real
+# credential. Entries are kept as full fingerprints so suppression stays
+# narrow and does not weaken the underlying rule set.
+
+# Test fixture: dummy Stellar secret key used only in unit tests.
+# This is a well-known throwaway key generated for tests and is never used
+# against any network. Verified by inspecting test/fixtures/keys.ts.
+# 0000000000000000000000000000000000000000:test/fixtures/keys.ts:stellar-secret-key:12
+
+# Documentation example: placeholder API token in README.
+# The value is an obvious placeholder (e.g. "your-api-token-here") shown to
+# illustrate configuration. Verified by inspecting docs/README.md.
+# 1111111111111111111111111111111111111111:docs/README.md:generic-api-key:45
+
+# Public key material: asymmetric public keys are not secrets and are safe to
+# commit. Suppressed only for the specific finding where the scanner matched a
+# public key against a private-key rule. Verified by inspecting the file.
+# 2222222222222222222222222222222222222222:src/config/public-keys.ts:private-key:8
