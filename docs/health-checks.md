@@ -9,10 +9,41 @@ Health check configuration and remediation guide for deployed CosmosVote service
 | Service | Endpoint | Method | Expected Response |
 |---------|----------|--------|-------------------|
 | Frontend (Vite/React) | `http://<host>:3000/` | GET | HTTP 200 |
-| Backend liveness | `http://<host>:8080/health/live` | GET | HTTP 200 whenever the process is up (lightweight ping) |
-| Backend readiness | `http://<host>:8080/health/ready` | GET | HTTP 200 when the database connection and Soroban RPC are healthy; otherwise HTTP 503 |
+| Backend liveness | `http://<host>:8080/health` | GET | `{"status":"ok","uptime":<seconds>}` |
+| Backend readiness | `http://<host>:8080/ready` | GET | HTTP 200 when Soroban RPC is healthy; otherwise HTTP 503 |
+| Backend version | `http://<host>:8080/version` | GET | `{"version":"<version>","commitSha":"<sha>","buildDate":"<date>"}` |
 | Horizon RPC Connector | `https://<horizon-url>/` | GET | HTTP 200 + JSON |
 | Soroban RPC | `https://<rpc-url>/` | POST `getHealth` | `{"status":"healthy"}` |
+
+### Version Endpoint
+
+`GET /version` returns the build metadata of the running notification service. It does not require authentication, so it can be used by deployment pipelines and monitoring to confirm which release is live.
+
+```bash
+curl -s http://<host>:8080/version | jq .
+# expected:
+# {
+#   "version": "1.4.0",
+#   "commitSha": "3f2a9c1",
+#   "buildDate": "2024-06-01T12:00:00Z"
+# }
+```
+
+The values are injected at build time from environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `VERSION` | Release version string (e.g. `1.4.0`) |
+| `COMMIT_SHA` | Git commit SHA of the deployed build |
+| `BUILD_DATE` | ISO 8601 timestamp of when the build was produced |
+
+These are read when the backend starts (or baked into the image during the build step) and served verbatim by `/version`. If a variable is unset, the corresponding field is returned as an empty string, so a missing value is visible rather than silently defaulted.
+
+```bash
+VERSION=1.4.0 COMMIT_SHA=$(git rev-parse --short HEAD) \
+  BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  docker compose up -d backend
+```
 
 ### Soroban RPC Health Call
 

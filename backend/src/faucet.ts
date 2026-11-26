@@ -1,7 +1,9 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
+import { resolveFaucetSecretKey } from './secrets';
 import {
   Contract,
   Keypair,
@@ -12,86 +14,113 @@ import {
   rpc as SorobanRpc,
 } from '@stellar/stellar-sdk';
 import Database from 'better-sqlite3';
+import { logger } from './logger';
 
 const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_IP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
 const WAL_CHECKPOINT_PAGE_THRESHOLD = 1000;
 
+export class FaucetDatabaseUnavailableError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = 'FaucetDatabaseUnavailableError';
+  }
+}
+
+function isDatabaseUnavailable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    /database is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(error.message)
+  );
+}
+
 export class FaucetClaimStore {
   private readonly db: Database.Database;
-  private readonly isWalMode: boolean;
+  // FIFO queue that serializes all write operations on the single connection.
+  private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(databasePath: string) {
     if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new Database(databasePath);
-    this.db.pragma('journal_mode = WAL');
-    this.isWalMode = String(this.db.pragma('journal_mode', { simple: true })).toLowerCase() === 'wal';
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS faucet_claims (
-        wallet_address TEXT PRIMARY KEY,
-        claimed_at_ms INTEGER NOT NULL
-      )
-    `);
+    try {
+      this.db = new Database(databasePath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('busy_timeout = 5000');
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS faucet_claims (
+          wallet_address TEXT PRIMARY KEY,
+          claimed_at_ms INTEGER NOT NULL
+        )
+      `);
+      // Verify the connection is healthy before serving traffic.
+      this.db.prepare('SELECT 1').get();
+    } catch (error) {
+      throw new FaucetDatabaseUnavailableError(
+        `Faucet database is unavailable at ${databasePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error,
+      );
+    }
   }
 
-  /**
-   * Runs `PRAGMA wal_checkpoint(TRUNCATE)`, flushing the WAL back into the main
-   * database file and truncating it to zero bytes. No-op outside WAL mode.
-   */
-  checkpoint(): void {
-    if (!this.isWalMode) return;
-    this.db.pragma('wal_checkpoint(TRUNCATE)');
+  private enqueueWrite<T>(operation: () => T): Promise<T> {
+    const run = this.writeQueue.then(operation, operation);
+    // Keep the chain alive even if an operation rejects.
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
-  /**
-   * Returns the number of pages currently held in the WAL file, or 0 when the
-   * database is not in WAL mode.
-   */
-  walPageCount(): number {
-    if (!this.isWalMode) return 0;
-    const result = this.db.pragma('wal_checkpoint(PASSIVE)', { simple: true }) as
-      | { busy: number; log: number; checkpointed: number }
-      | number
-      | undefined;
-    if (typeof result === 'number') return result;
-    if (result && typeof result === 'object') return Number(result.log ?? 0);
-    return 0;
+  private wrapError(error: unknown): never {
+    if (isDatabaseUnavailable(error)) {
+      throw new FaucetDatabaseUnavailableError(
+        'Faucet database is temporarily unavailable.',
+        error,
+      );
+    }
+    throw error;
   }
 
-  /**
-   * Truncates the WAL when it has grown past the page threshold. Safe to call
-   * after every write; cheap when the WAL is small.
-   */
-  maybeCheckpoint(): void {
-    if (!this.isWalMode) return;
-    if (this.walPageCount() > WAL_CHECKPOINT_PAGE_THRESHOLD) this.checkpoint();
-  }
+  reserve(address: string, now = Date.now()): Promise<number | null> {
+    return this.enqueueWrite(() => {
+      try {
+        const cutoff = now - CLAIM_COOLDOWN_MS;
+        const reserve = this.db.transaction(() => {
+          this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
+          const result = this.db.prepare(
+            'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
+          ).run(address, now);
+          return result.changes === 1;
+        });
 
-  reserve(address: string, now = Date.now()): number | null {
-    const cutoff = now - CLAIM_COOLDOWN_MS;
-    const reserve = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
-      const result = this.db.prepare(
-        'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
-      ).run(address, now);
-      return result.changes === 1;
+        if (reserve()) return null;
+        const claim = this.db.prepare(
+          'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
+        ).get(address) as { claimed_at_ms: number } | undefined;
+        return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
+      } catch (error) {
+        this.wrapError(error);
+      }
     });
-
-    const reserved = reserve();
-    this.maybeCheckpoint();
-    if (reserved) return null;
-    const claim = this.db.prepare(
-      'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
-    ).get(address) as { claimed_at_ms: number } | undefined;
-    return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
   }
 
-  release(address: string, claimedAt: number): void {
-    this.db.prepare(
-      'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
-    ).run(address, claimedAt);
-    this.maybeCheckpoint();
+  release(address: string, claimedAt: number): Promise<void> {
+    return this.enqueueWrite(() => {
+      try {
+        this.db.prepare(
+          'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
+        ).run(address, claimedAt);
+      } catch (error) {
+        this.wrapError(error);
+      }
+    });
   }
 
   close(): void {
@@ -110,6 +139,8 @@ export interface FaucetConfig {
   rpcUrl: string;
   amount: bigint;
   tokenDecimals: number;
+  /** Per-IP claim cooldown window in milliseconds (default: 24 h). */
+  ipCooldownMs?: number;
 }
 
 export class FaucetMintError extends Error {
@@ -194,6 +225,7 @@ export function createFaucetServer(
   config: FaucetConfig,
   store = new FaucetClaimStore(config.databasePath),
   mint: (config: FaucetConfig, recipient: string) => Promise<string> = mintTestTokens,
+  ipLimiter = new IpRateLimiter(config.ipCooldownMs ?? DEFAULT_IP_COOLDOWN_MS),
 ): Server {
   // Seed the runtime allowlist with the faucet's own origin so the single-origin
   // FAUCET_ALLOWED_ORIGIN path still works alongside the ALLOWED_ORIGINS list.
@@ -205,10 +237,14 @@ export function createFaucetServer(
     return normalised === faucetOrigin || isOriginAllowed(origin);
   }
 
-  return createServer(async (request, response) => {
+  return createServer(withRequestTimeout(async (request, response) => {
     const origin = request.headers.origin;
     if (origin && !originAllowed(origin)) {
-      sendJson(response, 403, { error: 'Origin not allowed.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.unauthorized,
+        title: 'Origin Not Allowed',
+        status: 403,
+      });
       return;
     }
     if (origin) {
@@ -223,11 +259,20 @@ export function createFaucetServer(
       return;
     }
     if (request.method !== 'POST' || request.url !== '/api/faucet/claim') {
-      sendJson(response, 404, { error: 'Not found.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.notFound,
+        title: 'Not Found',
+        status: 404,
+      });
       return;
     }
     if (!request.headers['content-type']?.includes('application/json')) {
-      sendJson(response, 415, { error: 'Content-Type must be application/json.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Unsupported Media Type',
+        status: 415,
+        detail: 'Content-Type must be application/json.',
+      });
       return;
     }
 
@@ -236,24 +281,66 @@ export function createFaucetServer(
       const body = await readJson(request);
       address = typeof body === 'object' && body !== null ? (body as { address?: unknown }).address : undefined;
     } catch {
-      sendJson(response, 400, { error: 'Request body must be valid JSON under 2 KB.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Request',
+        status: 400,
+        detail: 'Request body must be valid JSON under 2 KB.',
+      });
       return;
     }
     if (typeof address !== 'string' || !StrKey.isValidEd25519PublicKey(address)) {
-      sendJson(response, 400, { error: 'A valid Stellar public wallet address is required.' });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Request',
+        status: 400,
+        detail: 'A valid Stellar public wallet address is required.',
+      });
       return;
     }
 
+    const walletHash = hashWalletAddress(address);
     const now = Date.now();
-    const retryAt = store.reserve(address, now);
+    let retryAt: number | null;
+    try {
+      retryAt = await store.reserve(address, now);
+    } catch (error) {
+      if (error instanceof FaucetDatabaseUnavailableError) {
+        response.setHeader('Retry-After', '5');
+        sendJson(response, 503, { error: 'Faucet database is temporarily unavailable. Please retry shortly.' });
+        return;
+      }
+      throw error;
+    }
     if (retryAt !== null) {
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'rate_limited',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        retryAt: new Date(retryAt).toISOString(),
+      });
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
-      sendJson(response, 429, { error: 'This wallet has already claimed test tokens in the last 24 hours.', retryAt });
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.tooManyRequests,
+        title: 'Too Many Requests',
+        status: 429,
+        detail: 'This wallet has already claimed test tokens in the last 24 hours.',
+      });
       return;
     }
+
+    ipLimiter.record(hashIp(clientIp), now);
 
     try {
       const transactionHash = await mint(config, address);
+      logger.info({
+        event: 'faucet_claim',
+        outcome: 'success',
+        walletHash,
+        timestamp: new Date(now).toISOString(),
+        transactionHash,
+      });
       sendJson(response, 200, {
         amount: tokenAmountDisplay(config.amount, config.tokenDecimals),
         symbol: 'VOTE',
@@ -262,13 +349,20 @@ export function createFaucetServer(
       });
     } catch (error) {
       if (!(error instanceof FaucetMintError) || !error.claimConsumed) {
-        store.release(address, now);
+        try {
+          await store.release(address, now);
+        } catch (releaseError) {
+          if (!(releaseError instanceof FaucetDatabaseUnavailableError)) throw releaseError;
+        }
       }
-      sendJson(response, 502, {
-        error: error instanceof Error ? error.message : 'Faucet mint failed.',
+      sendProblem(response, request, {
+        type: PROBLEM_TYPES.internal,
+        title: 'Bad Gateway',
+        status: 502,
+        detail: error instanceof Error ? error.message : 'Faucet mint failed.',
       });
     }
-  });
+  }));
 }
 
 export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
@@ -276,7 +370,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   const required = [
     'FAUCET_ALLOWED_ORIGIN',
     'FAUCET_TOKEN_CONTRACT_ID',
-    'FAUCET_ADMIN_SECRET_KEY',
   ] as const;
   const missing = required.filter(key => !env[key]);
   if (missing.length) throw new Error(`Faucet is enabled but missing: ${missing.join(', ')}`);
@@ -293,15 +386,24 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   if (new URL(env.FAUCET_ALLOWED_ORIGIN!).protocol !== 'https:' && env.NODE_ENV === 'production') {
     throw new Error('FAUCET_ALLOWED_ORIGIN must use HTTPS in production.');
   }
-  const adminSecretKey = env.FAUCET_ADMIN_SECRET_KEY!;
-  if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
-    throw new Error('FAUCET_ADMIN_SECRET_KEY is invalid.');
+  const adminSecretKey = resolveFaucetSecretKey(env);
+  try {
+    if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
+      throw new Error('invalid public key length');
+    }
+  } catch {
+    // Never include the secret value in the error message.
+    throw new Error('The configured faucet secret key is invalid.');
   }
   const tokenContractId = env.FAUCET_TOKEN_CONTRACT_ID!;
   if (!StrKey.isValidContract(tokenContractId)) throw new Error('FAUCET_TOKEN_CONTRACT_ID is invalid.');
   const rpcUrl = new URL(env.FAUCET_RPC_URL ?? 'https://soroban-testnet.stellar.org');
   if (!['https:', ...(env.NODE_ENV === 'production' ? [] : ['http:'])].includes(rpcUrl.protocol)) {
     throw new Error('FAUCET_RPC_URL must use HTTPS in production.');
+  }
+  const ipCooldownMs = Number(env.FAUCET_IP_COOLDOWN_MS ?? String(DEFAULT_IP_COOLDOWN_MS));
+  if (!Number.isFinite(ipCooldownMs) || ipCooldownMs < 0) {
+    throw new Error('FAUCET_IP_COOLDOWN_MS must be a non-negative number of milliseconds.');
   }
 
   return {
@@ -312,5 +414,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
     rpcUrl: rpcUrl.toString(),
     amount,
     tokenDecimals,
+    ipCooldownMs,
   };
 }

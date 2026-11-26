@@ -20,7 +20,7 @@
  */
 
 import axios from 'axios';
-import { createHmac } from 'crypto';
+import Database from 'better-sqlite3';
 import { captureError } from './errorTracking';
 import { logger } from './logger';
 import { validateWebhookUrl } from './webhookUrlValidator';
@@ -35,8 +35,15 @@ const MAX_POLL_FAILURES = 3;
 const MAX_WEBHOOK_RETRIES = 3;
 const INITIAL_WEBHOOK_RETRY_DELAY_MS = 1_000;
 
-const SIGNATURE_HEADER = 'X-CosmosVote-Signature';
-const SIGNATURE_PREFIX = 'sha256=';
+const DEFAULT_DB_PATH = process.env.DB_PATH ?? 'data/notifications.db';
+
+export interface DeadLetterEntry {
+  id: number;
+  payload: string;
+  error: string;
+  attempts: number;
+  created_at: string;
+}
 
 function getHttpStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -65,28 +72,28 @@ export interface NotificationServiceConfig {
   contractId: string;
   webhookUrl: string;
   pollIntervalMs?: number;
-  webhookSecret?: string;
+  dbPath?: string;
 }
 
 export class NotificationService {
   private consecutiveFailures = 0;
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private readonly webhookSecret?: string;
+  private readonly db: Database.Database;
 
   constructor(private readonly config: NotificationServiceConfig) {
     activeSubscriptions.inc();
-    this.webhookSecret = config.webhookSecret ?? process.env.WEBHOOK_SECRET;
-    if (!this.webhookSecret) {
-      logger.warn(
-        {
-          event: 'webhook_secret_missing',
-          context: 'webhook-registration',
-          webhookUrl: this.config.webhookUrl,
-        },
-        'WEBHOOK_SECRET not configured — outgoing webhooks will be sent unsigned'
-      );
-    }
+    this.db = new Database(this.config.dbPath ?? DEFAULT_DB_PATH);
+    this.db.pragma('journal_mode = WAL');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS dead_letter (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payload TEXT NOT NULL,
+        error TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
     const validation = validateWebhookUrl(this.config.webhookUrl);
     if (!validation.ok) {
       logger.error(
@@ -214,6 +221,7 @@ export class NotificationService {
             attempts: attemptNumber,
             statusCode,
           });
+          this.recordDeadLetter(payload, `${status}: ${message}`, attemptNumber);
           return;
         }
 
@@ -225,6 +233,39 @@ export class NotificationService {
         );
       }
     }
+  }
+
+  private recordDeadLetter(payload: WebhookPayload, error: string, attempts: number): void {
+    try {
+      this.db
+        .prepare('INSERT INTO dead_letter (payload, error, attempts) VALUES (?, ?, ?)')
+        .run(JSON.stringify(payload), error, attempts);
+      logger.warn(
+        {
+          event: 'webhook_dead_letter',
+          contractId: this.config.contractId,
+          eventType: payload.event,
+          attempts,
+        },
+        'webhook delivery stored in dead letter queue'
+      );
+    } catch (dbErr) {
+      captureError(dbErr, {
+        context: 'dead-letter-insert',
+        contractId: this.config.contractId,
+        event: payload.event,
+      });
+      logger.error(
+        { event: 'dead_letter_insert_failed', err: dbErr },
+        'failed to store webhook in dead letter queue'
+      );
+    }
+  }
+
+  listDeadLetters(limit = 100): DeadLetterEntry[] {
+    return this.db
+      .prepare('SELECT id, payload, error, attempts, created_at FROM dead_letter ORDER BY id DESC LIMIT ?')
+      .all(limit) as DeadLetterEntry[];
   }
 
   async runOnce(): Promise<void> {
@@ -251,5 +292,9 @@ export class NotificationService {
     if (this.timer) clearTimeout(this.timer);
     activeSubscriptions.dec();
     logger.info({ event: 'service_stop' }, 'notification service loop stopped');
+  }
+
+  close(): void {
+    this.db.close();
   }
 }

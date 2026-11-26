@@ -1542,6 +1542,67 @@ fn test_execute_with_treasury_action() {
     assert_eq!(p.state, ProposalState::Passed);
 }
 
+#[test]
+fn test_execute_cross_contract_failure_marks_execution_failed() {
+    use crate::types::{TreasuryAction, TreasuryAsset};
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let voter = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register(cosmosvote_token::TokenContract, ());
+    let token = cosmosvote_token::TokenContractClient::new(&env, &token_id);
+    token.initialize(&admin, &1_000_000_000i128, &String::from_str(&env, "CosmosVote"), &String::from_str(&env, "VOTE"), &7u32);
+    token.mint(&admin, &voter, &10_000_000i128);
+
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+
+    // Treasury is deployed but never funded, so the disbursement below will
+    // fail inside the cross-contract call (insufficient balance).
+    let treasury_id = env.register(cosmosvote_treasury::TreasuryContract, ());
+    let treasury = cosmosvote_treasury::TreasuryContractClient::new(&env, &treasury_id);
+    treasury.initialize(&gov_id);
+
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &Some(treasury_id), &0u32);
+
+    let action = TreasuryAction {
+        recipient: recipient.clone(),
+        amount: 1_000i128,
+        asset: TreasuryAsset::Token(token_id.clone()),
+    };
+
+    let id = gov.create_proposal(
+        &voter,
+        &String::from_str(&env, "Underfunded Disbursement"),
+        &String::from_str(&env, "Transfer 1000 tokens treasury does not hold"),
+        &5_000_000i128,
+        &604_800u64,
+        &None,
+        &Some(action),
+    );
+
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    let proposal = gov.get_proposal(&id);
+    env.ledger().with_mut(|l| l.timestamp = proposal.end_time + 1);
+    gov.finalise(&id);
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Passed);
+
+    let result = gov.try_execute(&admin, &id);
+    assert!(result.is_err(), "execute should surface the cross-contract failure");
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::ExecutionFailed);
+
+    // Admin can retry execute() after the underlying issue (e.g. funding the
+    // treasury) is resolved — here we just confirm the retry path is open,
+    // i.e. execute is callable again from ExecutionFailed rather than being
+    // permanently stuck.
+    let retry = gov.try_execute(&admin, &id);
+    assert!(retry.is_err());
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::ExecutionFailed);
+}
+
 // ---------------------------------------------------------------------------
 // amend_proposal
 // ---------------------------------------------------------------------------
@@ -2017,6 +2078,68 @@ fn test_set_proposal_cooldown_non_admin_fails() {
     let (gov, _, _, voter, _) = setup(&env);
     let result = gov.try_set_proposal_cooldown(&voter, &3600u64);
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
+}
+
+// ---------------------------------------------------------------------------
+// Issue #460: update_proposal_cooldown
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_update_proposal_cooldown_succeeds_for_admin() {
+    let env = Env::default();
+    let (gov, _, admin, _, _) = setup(&env);
+    assert_eq!(gov.get_config().proposal_cooldown, 0u64);
+
+    gov.update_proposal_cooldown(&admin, &7_200u64);
+    assert_eq!(gov.get_config().proposal_cooldown, 7_200u64);
+
+    // Updating again overwrites the previous value.
+    gov.update_proposal_cooldown(&admin, &1_800u64);
+    assert_eq!(gov.get_config().proposal_cooldown, 1_800u64);
+}
+
+#[test]
+fn test_update_proposal_cooldown_non_admin_fails() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+    let result = gov.try_update_proposal_cooldown(&voter, &7_200u64);
+    assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
+    // Value must remain unchanged after a rejected call.
+    assert_eq!(gov.get_config().proposal_cooldown, 0u64);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #458: Treasury recipient validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_proposal_rejects_zero_address_treasury_recipient() {
+    let env = Env::default();
+    let (gov, _, _, voter, _) = setup(&env);
+
+    // The all-zeros Stellar public key — no valid keypair can sign for it.
+    let zero_addr = Address::from_string(
+        &String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"),
+    );
+
+    let action = TreasuryAction {
+        recipient: zero_addr,
+        amount: 1_000i128,
+        asset: TreasuryAsset::Token(gov.get_config().voting_token),
+    };
+
+    let result = gov.try_create_proposal(
+        &voter,
+        &String::from_str(&env, "Treasury Disbursement"),
+        &String::from_str(&env, "Attempt to disburse to the zero address"),
+        &5_000_000i128,
+        &604_800u64,
+        &None,
+        &Some(action),
+    );
+    assert_eq!(result, Err(Ok(ContractError::InvalidRecipient)));
+    // No proposal should have been created.
+    assert_eq!(gov.proposal_count(), 0u64);
 }
 
 #[test]

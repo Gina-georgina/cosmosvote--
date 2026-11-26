@@ -12,6 +12,7 @@ The plugin:
 1. Generates a cryptographically random 16-byte base64 nonce (`crypto.randomBytes(16).toString('base64')`) once per build.
 2. Injects `nonce="<value>"` onto every inline `<script>` and `<style>` tag in `dist/index.html`.
 3. Embeds a `<meta name="csp-nonce" content="<value>">` tag in `<head>`.
+4. Installs a runtime patch (injected into the bundle) that reads the nonce from `<meta name="csp-nonce">` and applies it to every `<style>` element injected dynamically after page load (CSS-in-JS, lazy-loaded styles, etc.). The patch wraps `document.createElement`, `Node.prototype.appendChild`/`insertBefore`, and `CSSStyleSheet` insertion so any `<style>` tag created at runtime receives the build nonce before it is attached to the DOM.
 
 The server-side edge function (Lambda@Edge or CloudFront Function) **must** read the nonce from the `<meta name="csp-nonce">` tag and echo it into the `Content-Security-Policy` response header before serving the HTML, replacing the `{{NONCE}}` placeholder defined in `PRODUCTION_CSP_TEMPLATE` (exported from `vite.config.ts`).
 
@@ -27,7 +28,9 @@ response.headers['content-security-policy'] = [{ key: 'Content-Security-Policy',
 
 #### `unsafe-inline` removal
 
-`'unsafe-inline'` is intentionally absent from `script-src` in the production template. Inline scripts without a matching nonce will be blocked.
+`'unsafe-inline'` is intentionally absent from both `script-src` and `style-src` in the production template. Inline scripts and styles without a matching nonce will be blocked.
+
+`style-src` uses `'nonce-{{NONCE}}'` instead of `'unsafe-inline'`. Because the runtime patch (step 4 above) applies the same build nonce to dynamically injected `<style>` tags, CSS-in-JS and other runtime style injection continue to work without weakening the policy.
 
 #### Stellar SDK Web Workers
 
@@ -61,6 +64,21 @@ connect-src ... ws://localhost:5173
 - Open the app in a browser served with the production CSP header and verify no CSP violations appear in the console.
 - Test the Stellar SDK wallet flow to confirm Web Workers load correctly under `worker-src blob:`.
 - Use the `Content-Security-Policy-Report-Only` header to collect violations before enforcing.
+
+### Verifying style nonces with report-only mode
+
+1. Serve the production build with the policy under `Content-Security-Policy-Report-Only` (with `style-src 'nonce-{{NONCE}}'` and no `'unsafe-inline'`) and `report-uri /api/csp-report`.
+2. Exercise the app so that dynamically injected styles are created (navigate between routes, open modals, trigger lazy-loaded components).
+3. Confirm the report endpoint receives **zero** `style-src` violations. Any `style-src` violation indicates a `<style>` tag that bypassed the runtime patch.
+4. Once the report-only run is clean, switch to the enforcing `Content-Security-Policy` header.
+
+### Regression test
+
+The `frontend-csp` test suite includes a regression test covering dynamic style injection:
+
+- It builds the app and asserts `style-src` in `PRODUCTION_CSP_TEMPLATE` contains `'nonce-{{NONCE}}'` and does not contain `'unsafe-inline'`.
+- It loads `dist/index.html` in a DOM environment, injects a `<style>` element at runtime, and asserts the element carries the same nonce as `<meta name="csp-nonce">`.
+- It fails if the runtime patch is removed or if any dynamically created `<style>` tag is left without a nonce.
 
 ## Wallet / XSS considerations
 

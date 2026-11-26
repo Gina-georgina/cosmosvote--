@@ -18,6 +18,7 @@
   "dependencies": {
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "12.3.0",
+    "@tanstack/react-virtual": "^3.13.12",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zustand": "4.5.4"
@@ -33,6 +34,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "@vitest/coverage-v8": "4.1.9",
     "eslint": "10.4.1",
+    "eslint-plugin-i18next": "6.1.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "license-checker": "25.0.1",
     "typescript": "7.0.2",

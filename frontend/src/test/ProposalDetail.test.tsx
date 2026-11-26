@@ -1,31 +1,15 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProposalDetail } from '../components/ProposalDetail';
 import { useProposalStore } from '../store/proposalStore';
 import type { Proposal } from '../types';
 
+const mockCastVote = vi.fn().mockResolvedValue(undefined);
+
 vi.mock('../api', () => ({
   fetchHasVoted: vi.fn().mockResolvedValue(false),
   fetchVoteRecord: vi.fn().mockResolvedValue(null),
-  fetchProposal: vi.fn(),
-}));
-
-vi.mock('../store/walletStore', () => ({
-  useWalletStore: Object.assign(
-    (selector?: (s: unknown) => unknown) => {
-      const state = {
-        address: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
-        signTransaction: vi.fn().mockResolvedValue('signed-xdr'),
-      };
-      return selector ? selector(state) : state;
-    },
-    {
-      getState: () => ({
-        address: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
-        signTransaction: vi.fn().mockResolvedValue('signed-xdr'),
-      }),
-    },
-  ),
+  castVote: (...args: unknown[]) => mockCastVote(...args),
 }));
 
 const mockProposal: Proposal = {
@@ -77,89 +61,59 @@ describe('ProposalDetail', () => {
     expect(screen.getByText('Checking vote status...')).toBeInTheDocument();
   });
 
-  describe('optimistic vote flow', () => {
+  describe('multi-choice proposals', () => {
+    const multiChoiceProposal: Proposal = {
+      ...mockProposal,
+      choices: ['Option A', 'Option B', 'Option C'],
+    };
+
     const wallet = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN';
 
-    beforeEach(() => {
-      useProposalStore.setState({
-        proposals: [mockProposal],
-        optimisticVotes: {},
-        votedMap: {},
-      } as never);
+    it('renders a radio-button list of choices instead of yes/no/abstain', () => {
+      render(<ProposalDetail proposal={multiChoiceProposal} decimals={0} walletAddress={wallet} onClose={vi.fn()} />);
+      const radios = screen.getAllByRole('radio');
+      expect(radios).toHaveLength(3);
+      expect(screen.getByText('Option A')).toBeInTheDocument();
+      expect(screen.getByText('Option B')).toBeInTheDocument();
+      expect(screen.getByText('Option C')).toBeInTheDocument();
+      expect(screen.queryByText('✅ Yes')).not.toBeInTheDocument();
+      expect(screen.queryByText('❌ No')).not.toBeInTheDocument();
+      expect(screen.queryByText('⬜ Abstain')).not.toBeInTheDocument();
     });
 
-    it('increments tally and sets hasVoted immediately after a confirmed vote', () => {
-      const store = useProposalStore.getState() as unknown as {
-        applyOptimisticVote: (id: bigint, choice: 'yes' | 'no' | 'abstain', addr: string) => void;
-      };
-
-      act(() => {
-        store.applyOptimisticVote(2n, 'yes', wallet);
-      });
-
-      const state = useProposalStore.getState() as unknown as {
-        proposals: Proposal[];
-        optimisticVotes: Record<string, unknown>;
-        votedMap: Record<string, boolean>;
-      };
-
-      const updated = state.proposals.find((p) => p.id === 2n);
-      expect(updated?.votes_yes).toBe(301n);
-      expect(state.votedMap[`2:${wallet}`]).toBe(true);
-      expect(state.optimisticVotes['2']).toBeDefined();
+    it('highlights the selected choice with aria-pressed', () => {
+      render(<ProposalDetail proposal={multiChoiceProposal} decimals={0} walletAddress={wallet} onClose={vi.fn()} />);
+      const radios = screen.getAllByRole('radio');
+      expect(radios[0]).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(radios[1]);
+      expect(radios[1]).toHaveAttribute('aria-pressed', 'true');
+      expect(radios[0]).toHaveAttribute('aria-pressed', 'false');
     });
 
-    it('rolls back to server values when a poll conflicts with the optimistic tally', () => {
-      const store = useProposalStore.getState() as unknown as {
-        applyOptimisticVote: (id: bigint, choice: 'yes' | 'no' | 'abstain', addr: string) => void;
-        reconcileProposal: (proposal: Proposal) => void;
-      };
-
-      act(() => {
-        store.applyOptimisticVote(2n, 'yes', wallet);
+    it('submits Vote::Choice(index) to the contract', async () => {
+      render(<ProposalDetail proposal={multiChoiceProposal} decimals={0} walletAddress={wallet} onClose={vi.fn()} />);
+      const radios = screen.getAllByRole('radio');
+      fireEvent.click(radios[2]);
+      fireEvent.click(screen.getByRole('button', { name: /vote/i }));
+      await waitFor(() => {
+        expect(mockCastVote).toHaveBeenCalledWith(
+          expect.anything(),
+          wallet,
+          multiChoiceProposal.id,
+          { Choice: 2 },
+        );
       });
-
-      // Server poll returns a tally that does not include the optimistic vote.
-      const serverProposal: Proposal = { ...mockProposal, votes_yes: 300n };
-
-      act(() => {
-        store.reconcileProposal(serverProposal);
-      });
-
-      const state = useProposalStore.getState() as unknown as {
-        proposals: Proposal[];
-        optimisticVotes: Record<string, unknown>;
-      };
-
-      const reconciled = state.proposals.find((p) => p.id === 2n);
-      expect(reconciled?.votes_yes).toBe(300n);
-      expect(state.optimisticVotes['2']).toBeUndefined();
     });
 
-    it('keeps the optimistic tally when the poll agrees with it', () => {
-      const store = useProposalStore.getState() as unknown as {
-        applyOptimisticVote: (id: bigint, choice: 'yes' | 'no' | 'abstain', addr: string) => void;
-        reconcileProposal: (proposal: Proposal) => void;
+    it('displays the winning choice after finalisation', () => {
+      const finalisedProposal: Proposal = {
+        ...multiChoiceProposal,
+        state: 'Succeeded',
+        winning_choice: 1,
       };
-
-      act(() => {
-        store.applyOptimisticVote(2n, 'yes', wallet);
-      });
-
-      const serverProposal: Proposal = { ...mockProposal, votes_yes: 301n };
-
-      act(() => {
-        store.reconcileProposal(serverProposal);
-      });
-
-      const state = useProposalStore.getState() as unknown as {
-        proposals: Proposal[];
-        optimisticVotes: Record<string, unknown>;
-      };
-
-      const reconciled = state.proposals.find((p) => p.id === 2n);
-      expect(reconciled?.votes_yes).toBe(301n);
-      expect(state.optimisticVotes['2']).toBeUndefined();
+      render(<ProposalDetail proposal={finalisedProposal} decimals={0} walletAddress={wallet} onClose={vi.fn()} />);
+      expect(screen.getByText(/winning choice/i)).toBeInTheDocument();
+      expect(screen.getByText('Option B')).toBeInTheDocument();
     });
   });
 });

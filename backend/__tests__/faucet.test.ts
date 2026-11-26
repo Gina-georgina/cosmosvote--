@@ -1,9 +1,15 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { Keypair } from '@stellar/stellar-sdk';
-import { createFaucetServer, FaucetClaimStore, type FaucetConfig } from '../src/faucet';
+import {
+  createFaucetServer,
+  FaucetClaimStore,
+  readFaucetConfig,
+  resolveFaucetSecretKey,
+  type FaucetConfig,
+} from '../src/faucet';
 
 describe('FaucetClaimStore', () => {
   let directory: string;
@@ -16,70 +22,115 @@ describe('FaucetClaimStore', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it('allows one claim and returns the cooldown expiry for duplicates', () => {
+  it('allows one claim and returns the cooldown expiry for duplicates', async () => {
     const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
     const now = 1_800_000_000_000;
 
-    expect(store.reserve('GTESTWALLET', now)).toBeNull();
-    expect(store.reserve('GTESTWALLET', now + 1)).toBe(now + 24 * 60 * 60 * 1000);
+    await expect(store.reserve('GTESTWALLET', now)).resolves.toBeNull();
+    await expect(store.reserve('GTESTWALLET', now + 1)).resolves.toBe(now + 24 * 60 * 60 * 1000);
     store.close();
   });
 
-  it('retains cooldowns across database reopen and expires them after 24 hours', () => {
+  it('retains cooldowns across database reopen and expires them after 24 hours', async () => {
     const path = join(directory, 'claims.sqlite');
     const now = 1_800_000_000_000;
     const first = new FaucetClaimStore(path);
-    first.reserve('GTESTWALLET', now);
+    await first.reserve('GTESTWALLET', now);
     first.close();
 
     const reopened = new FaucetClaimStore(path);
-    expect(reopened.reserve('GTESTWALLET', now + 10)).toBe(now + 24 * 60 * 60 * 1000);
-    expect(reopened.reserve('GTESTWALLET', now + 24 * 60 * 60 * 1000)).toBeNull();
+    await expect(reopened.reserve('GTESTWALLET', now + 10)).resolves.toBe(now + 24 * 60 * 60 * 1000);
+    await expect(reopened.reserve('GTESTWALLET', now + 24 * 60 * 60 * 1000)).resolves.toBeNull();
     reopened.close();
   });
 
-  it('releases a reservation when minting fails before submission', () => {
+  it('releases a reservation when minting fails before submission', async () => {
     const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
     const now = 1_800_000_000_000;
 
-    store.reserve('GTESTWALLET', now);
-    store.release('GTESTWALLET', now);
-    expect(store.reserve('GTESTWALLET', now + 1)).toBeNull();
+    await store.reserve('GTESTWALLET', now);
+    await store.release('GTESTWALLET', now);
+    await expect(store.reserve('GTESTWALLET', now + 1)).resolves.toBeNull();
     store.close();
   });
 
-  it('checkpoints the WAL with TRUNCATE on shutdown', () => {
-    const path = join(directory, 'claims.sqlite');
-    const store = new FaucetClaimStore(path);
-    store.reserve('GTESTWALLET', 1_800_000_000_000);
+  it('throws when the database path is unavailable', () => {
+    const missingDirectory = join(directory, 'does-not-exist', 'nested', 'claims.sqlite');
+    expect(() => new FaucetClaimStore(missingDirectory)).toThrow();
+  });
+});
 
-    const execSpy = jest.spyOn(store, 'exec');
-    store.checkpoint();
+describe('faucet secret resolution', () => {
+  const secret = Keypair.random().secret();
+  let directory: string;
+  let warn: jest.SpyInstance;
 
-    expect(execSpy).toHaveBeenCalledWith('PRAGMA wal_checkpoint(TRUNCATE)');
-    expect(existsSync(`${path}-wal`)).toBe(false);
-    execSpy.mockRestore();
-    store.close();
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), 'cosmosvote-faucet-secret-'));
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
-  it('checkpoints when the WAL exceeds 1000 pages', () => {
-    const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
-    store.reserve('GTESTWALLET', 1_800_000_000_000);
+  afterEach(() => {
+    warn.mockRestore();
+    rmSync(directory, { recursive: true, force: true });
+  });
 
-    const pageCountSpy = jest.spyOn(store, 'walPageCount').mockReturnValue(1_001);
-    const execSpy = jest.spyOn(store, 'exec');
+  it('reads and trims the key from FAUCET_SECRET_KEY_FILE', () => {
+    const path = join(directory, 'faucet.key');
+    writeFileSync(path, `  ${secret}\n`);
 
-    store.maybeCheckpoint();
-    expect(execSpy).toHaveBeenCalledWith('PRAGMA wal_checkpoint(TRUNCATE)');
+    expect(resolveFaucetSecretKey({ FAUCET_SECRET_KEY_FILE: path })).toBe(secret);
+    expect(warn).not.toHaveBeenCalled();
+  });
 
-    execSpy.mockClear();
-    pageCountSpy.mockReturnValue(1_000);
-    store.maybeCheckpoint();
-    expect(execSpy).not.toHaveBeenCalled();
+  it('falls back to FAUCET_SECRET_KEY with exactly one deprecation warning', () => {
+    expect(resolveFaucetSecretKey({ FAUCET_SECRET_KEY: secret })).toBe(secret);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/deprecat/i);
+    expect(warn.mock.calls[0][0]).not.toContain(secret);
+  });
 
-    pageCountSpy.mockRestore();
-    execSpy.mockRestore();
-    store.close();
+  it('throws when multiple sources are configured without leaking the secret', () => {
+    const path = join(directory, 'faucet.key');
+    writeFileSync(path, secret);
+
+    let error: unknown;
+    try {
+      resolveFaucetSecretKey({ FAUCET_SECRET_KEY_FILE: path, FAUCET_SECRET_KEY: secret });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(secret);
+  });
+
+  it('throws when no source is configured', () => {
+    expect(() => resolveFaucetSecretKey({})).toThrow(/FAUCET_SECRET_KEY_FILE/);
+  });
+
+  it('reads a file-based config and fails when the file is missing', () => {
+    const path = join(directory, 'faucet.key');
+    writeFileSync(path, secret);
+    const env = {
+      FAUCET_SECRET_KEY_FILE: path,
+      FAUCET_ALLOWED_ORIGIN: 'https://app.example',
+      FAUCET_DATABASE_PATH: join(directory, 'claims.sqlite'),
+      FAUCET_TOKEN_CONTRACT_ID: 'C'.repeat(56),
+      FAUCET_RPC_URL: 'https://soroban-testnet.stellar.org',
+    };
+
+    const config = readFaucetConfig(env);
+    expect(config.adminSecretKey).toBe(secret);
+
+    let error: unknown;
+    try {
+      readFaucetConfig({ ...env, FAUCET_SECRET_KEY_FILE: join(directory, 'missing.key') });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(secret);
   });
 });
 
@@ -145,5 +196,24 @@ describe('faucet endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(mint).not.toHaveBeenCalled();
+  });
+
+  it('handles 50 concurrent claims without SQLITE_BUSY errors', async () => {
+    const addresses = Array.from({ length: 50 }, () => Keypair.random().publicKey());
+
+    const responses = await Promise.all(addresses.map(address => fetch(`${baseUrl}/api/faucet/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: config.allowedOrigin },
+      body: JSON.stringify({ address }),
+    })));
+
+    const bodies = await Promise.all(responses.map(response => response.text()));
+    for (const response of responses) {
+      expect(response.status).toBeLessThan(500);
+    }
+    for (const body of bodies) {
+      expect(body).not.toMatch(/SQLITE_BUSY/i);
+    }
+    expect(mint).toHaveBeenCalledTimes(50);
   });
 });

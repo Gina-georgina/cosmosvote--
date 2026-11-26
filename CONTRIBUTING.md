@@ -56,6 +56,13 @@ Open a GitHub Discussion or Issue tagged `enhancement`. Describe the use case an
 - Add on-chain events in `contracts/<contract>/src/events.rs` for state changes.
 - Privileged functions must call `require_auth()` and validate inputs.
 
+### Adding a new `ContractError` variant
+- Every new variant added to `ContractError` in `contracts/<contract>/src/types.rs` **must** ship with a corresponding test in `contracts/<contract>/src/error_coverage_tests.rs`.
+- The test must exercise the error path and assert the variant's **exact numeric code** (e.g. `assert_eq!(err, ContractError::Foo as u32)`), so that accidental changes to error discriminants are caught.
+- The CI coverage gate enforces **100% error-variant coverage**: a PR that adds a `ContractError` variant without a matching test in `error_coverage_tests.rs` will fail CI and cannot be merged.
+- When adding a variant, also update the coverage report/checklist so the new variant is listed as covered.
+======
+
 ### Writing unit tests
 - Add unit tests in `contracts/<contract>/src/test.rs`.
 - Use `Env::default()` and `env.mock_all_auths()`.
@@ -85,6 +92,7 @@ Open a GitHub Discussion or Issue tagged `enhancement`. Describe the use case an
 - [ ] Input validation is implemented for all new functions
 - [ ] State updates are covered by unit tests
 - [ ] Failure cases are covered by `try_*` tests
+- [ ] Every new `ContractError` variant has a test in `error_coverage_tests.rs` asserting its exact numeric code (100% error-variant coverage)
 - [ ] Property tests are added or updated for contract invariants
 - [ ] Events are emitted for relevant state changes
 - [ ] Storage schema changes are tracked in storage helpers

@@ -6,10 +6,11 @@ import { createHealthServer } from '../src/health';
 function request(
   server: Server,
   path: string,
+  headers?: Record<string, string>,
 ): Promise<{ statusCode: number; body: string; headers: Record<string, string | string[] | undefined> }> {
   const address = server.address() as AddressInfo;
   return new Promise((resolve, reject) => {
-    get({ hostname: '127.0.0.1', port: address.port, path }, (response) => {
+    get({ hostname: '127.0.0.1', port: address.port, path, headers }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk: string) => { body += chunk; });
@@ -65,6 +66,43 @@ describe('health endpoints', () => {
     expect(headers['referrer-policy']).toBe('strict-origin');
   });
 
+  it('returns build metadata from /version without authentication', async () => {
+    const previous = {
+      version: process.env.APP_VERSION,
+      commitSha: process.env.GIT_COMMIT_SHA,
+      buildDate: process.env.BUILD_DATE,
+    };
+    process.env.APP_VERSION = '1.2.3';
+    process.env.GIT_COMMIT_SHA = 'abc123def';
+    process.env.BUILD_DATE = '2024-01-02T03:04:05Z';
+
+    try {
+      server = createHealthServer(async () => true);
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+      const result = await request(server, '/version');
+
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({
+        version: '1.2.3',
+        commitSha: 'abc123def',
+        buildDate: '2024-01-02T03:04:05Z',
+      });
+    } finally {
+      for (const [key, value] of Object.entries({
+        APP_VERSION: previous.version,
+        GIT_COMMIT_SHA: previous.commitSha,
+        BUILD_DATE: previous.buildDate,
+      })) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('sets security headers on readiness responses, including 503', async () => {
     let ready = true;
     server = createHealthServer(async () => ready, undefined, async () => true);
@@ -86,83 +124,50 @@ describe('health endpoints', () => {
     expect(notReadyResponse.headers['referrer-policy']).toBe('strict-origin');
   });
 
-  it('/health/live returns 200 even when the database check fails', async () => {
-    server = createHealthServer(
-      async () => true,
-      () => 3,
-      async () => { throw new Error('db down'); },
-    );
+  it('sets a UUID X-Request-Id header on every route', async () => {
+    let ready = true;
+    server = createHealthServer(async () => ready);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
-    const result = await request(server, '/health/live');
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-    expect(result.statusCode).toBe(200);
-    expect(JSON.parse(result.body)).toEqual({ status: 'ok', uptime: 3 });
+    const healthResponse = await request(server, '/health');
+    expect(healthResponse.statusCode).toBe(200);
+    expect(typeof healthResponse.headers['x-request-id']).toBe('string');
+    expect(healthResponse.headers['x-request-id']).toMatch(uuidPattern);
+
+    const readyResponse = await request(server, '/ready');
+    expect(readyResponse.statusCode).toBe(200);
+    expect(typeof readyResponse.headers['x-request-id']).toBe('string');
+    expect(readyResponse.headers['x-request-id']).toMatch(uuidPattern);
+
+    ready = false;
+    const notReadyResponse = await request(server, '/ready');
+    expect(notReadyResponse.statusCode).toBe(503);
+    expect(typeof notReadyResponse.headers['x-request-id']).toBe('string');
+    expect(notReadyResponse.headers['x-request-id']).toMatch(uuidPattern);
+
+    expect(healthResponse.headers['x-request-id']).not.toBe(readyResponse.headers['x-request-id']);
   });
 
-  it('/health/ready returns 200 when the database check succeeds', async () => {
-    server = createHealthServer(async () => true, undefined, async () => true);
+  it('echoes a client-supplied X-Request-Id header', async () => {
+    let ready = true;
+    server = createHealthServer(async () => ready);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
-    const result = await request(server, '/health/ready');
+    const clientRequestId = 'client-supplied-request-id-123';
 
-    expect(result.statusCode).toBe(200);
-    expect(JSON.parse(result.body)).toEqual({ status: 'ok' });
-  });
+    const healthResponse = await request(server, '/health', { 'X-Request-Id': clientRequestId });
+    expect(healthResponse.statusCode).toBe(200);
+    expect(healthResponse.headers['x-request-id']).toBe(clientRequestId);
 
-  it('/health/ready returns 503 when the database check fails', async () => {
-    server = createHealthServer(async () => true, undefined, async () => false);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const readyResponse = await request(server, '/ready', { 'X-Request-Id': clientRequestId });
+    expect(readyResponse.statusCode).toBe(200);
+    expect(readyResponse.headers['x-request-id']).toBe(clientRequestId);
 
-    const result = await request(server, '/health/ready');
-
-    expect(result.statusCode).toBe(503);
-    expect(JSON.parse(result.body)).toEqual({ status: 'unavailable' });
-  });
-
-  it('/health/ready returns 503 when the database check throws', async () => {
-    server = createHealthServer(
-      async () => true,
-      undefined,
-      async () => { throw new Error('connection refused'); },
-    );
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-
-    const result = await request(server, '/health/ready');
-
-    expect(result.statusCode).toBe(503);
-    expect(JSON.parse(result.body)).toEqual({ status: 'unavailable' });
-  });
-
-  it('sets security headers on /health/live and /health/ready responses, including 503', async () => {
-    let dbUp = true;
-    server = createHealthServer(
-      async () => true,
-      () => 1,
-      async () => dbUp,
-    );
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-
-    const liveResponse = await request(server, '/health/live');
-    expect(liveResponse.statusCode).toBe(200);
-    expect(liveResponse.headers['strict-transport-security']).toBe('max-age=31536000');
-    expect(liveResponse.headers['x-frame-options']).toBe('DENY');
-    expect(liveResponse.headers['x-content-type-options']).toBe('nosniff');
-    expect(liveResponse.headers['referrer-policy']).toBe('strict-origin');
-
-    const readyOk = await request(server, '/health/ready');
-    expect(readyOk.statusCode).toBe(200);
-    expect(readyOk.headers['strict-transport-security']).toBe('max-age=31536000');
-    expect(readyOk.headers['x-frame-options']).toBe('DENY');
-    expect(readyOk.headers['x-content-type-options']).toBe('nosniff');
-    expect(readyOk.headers['referrer-policy']).toBe('strict-origin');
-
-    dbUp = false;
-    const readyDown = await request(server, '/health/ready');
-    expect(readyDown.statusCode).toBe(503);
-    expect(readyDown.headers['strict-transport-security']).toBe('max-age=31536000');
-    expect(readyDown.headers['x-frame-options']).toBe('DENY');
-    expect(readyDown.headers['x-content-type-options']).toBe('nosniff');
-    expect(readyDown.headers['referrer-policy']).toBe('strict-origin');
+    ready = false;
+    const notReadyResponse = await request(server, '/ready', { 'X-Request-Id': clientRequestId });
+    expect(notReadyResponse.statusCode).toBe(503);
+    expect(notReadyResponse.headers['x-request-id']).toBe(clientRequestId);
   });
 });

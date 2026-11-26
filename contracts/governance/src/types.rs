@@ -59,6 +59,7 @@ pub enum ContractError {
     // Execution
     ExecutionFailed     = 60,
     InvalidTreasuryAmount = 61,
+    InvalidRecipient    = 62,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ pub enum ProposalState {
     Rejected,
     Executed,
     Cancelled,
+    ExecutionFailed,
 }
 
 #[contracttype]

@@ -17,29 +17,36 @@ interface ProposalState {
   progress: { loaded: number; total: number } | null;
   /** Map from proposal id (as string) to the connected user's vote record */
   votedMap: Map<string, VoteRecord>;
-  /** Map from proposal id (as string) to pending optimistic vote state */
-  optimisticVotes: Map<string, OptimisticVote>;
+  /** Current page of the proposal list (1-based) */
+  currentPage: number;
+  /** Number of proposals displayed per page */
+  pageSize: number;
 
   // Actions
   loadProposals: () => Promise<void>;
   loadVotesForUser: (walletAddress: string) => Promise<void>;
   clearVotes: () => void;
-  applyOptimisticVote: (proposalId: string, vote: boolean, weight: number) => void;
-  reconcileVotes: (serverProposals: Proposal[]) => void;
-  clearOptimisticVote: (proposalId: string) => void;
+  setPage: (page: number) => void;
 }
 
-/** Read a numeric tally field from a proposal, tolerating string/number shapes. */
-function tallyValue(proposal: Proposal, key: 'yes' | 'no'): number {
-  const raw = (proposal as unknown as Record<string, unknown>)[key];
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
+export const DEFAULT_PAGE_SIZE = 10;
 
-/** Return a copy of the proposal with the given tally field set. */
-function withTally(proposal: Proposal, key: 'yes' | 'no', value: number): Proposal {
-  return { ...proposal, [key]: value } as Proposal;
-}
+/** Returns the slice of proposals belonging to the given 1-based page. */
+export const getPageProposals = (
+  proposals: Proposal[],
+  page: number,
+  pageSize: number = DEFAULT_PAGE_SIZE
+): Proposal[] => {
+  const safeSize = Math.max(1, Math.floor(pageSize));
+  const totalPages = Math.max(1, Math.ceil(proposals.length / safeSize));
+  const safePage = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+  const start = (safePage - 1) * safeSize;
+  return proposals.slice(start, start + safeSize);
+};
+
+/** Selector hook returning the proposals for the current page. */
+export const usePaginatedProposals = (): Proposal[] =>
+  useProposalStore((state) => getPageProposals(state.proposals, state.currentPage, state.pageSize));
 
 export const useProposalStore = create<ProposalState>((set, get) => ({
   proposals: [],
@@ -48,7 +55,8 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
   error: null,
   progress: null,
   votedMap: new Map(),
-  optimisticVotes: new Map(),
+  currentPage: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
 
   loadProposals: async () => {
     set({ loading: true, error: null, progress: null });
@@ -81,84 +89,12 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
     set({ votedMap });
   },
 
-  clearVotes: () => set({ votedMap: new Map(), optimisticVotes: new Map() }),
+  clearVotes: () => set({ votedMap: new Map() }),
 
-  applyOptimisticVote: (proposalId, vote, weight) => {
-    const { proposals, votedMap, optimisticVotes } = get();
-    const key = String(proposalId);
-    const index = proposals.findIndex((p) => String(p.id) === key);
-    if (index === -1) return;
-
-    const proposal = proposals[index];
-    const previousTally = { yes: tallyValue(proposal, 'yes'), no: tallyValue(proposal, 'no') };
-    const tallyKey: 'yes' | 'no' = vote ? 'yes' : 'no';
-    const updated = withTally(proposal, tallyKey, previousTally[tallyKey] + weight);
-
-    const nextProposals = proposals.slice();
-    nextProposals[index] = updated;
-
-    const nextVotedMap = new Map(votedMap);
-    nextVotedMap.set(key, { vote, weight } as VoteRecord);
-
-    const nextOptimistic = new Map(optimisticVotes);
-    nextOptimistic.set(key, { vote, weight, previousTally });
-
-    set({ proposals: nextProposals, votedMap: nextVotedMap, optimisticVotes: nextOptimistic });
-  },
-
-  reconcileVotes: (serverProposals) => {
-    const { optimisticVotes } = get();
-    if (optimisticVotes.size === 0) {
-      set({ proposals: serverProposals });
-      return;
-    }
-
-    const nextOptimistic = new Map(optimisticVotes);
-    const nextVotedMap = new Map(get().votedMap);
-
-    const reconciled = serverProposals.map((serverProposal) => {
-      const key = String(serverProposal.id);
-      const optimistic = optimisticVotes.get(key);
-      if (!optimistic) return serverProposal;
-
-      const tallyKey: 'yes' | 'no' = optimistic.vote ? 'yes' : 'no';
-      const serverTally = tallyValue(serverProposal, tallyKey);
-      const expectedTally = optimistic.previousTally[tallyKey] + optimistic.weight;
-
-      // If the server tally already includes our delta, keep the server value.
-      if (serverTally >= expectedTally) {
-        nextOptimistic.delete(key);
-        return serverProposal;
-      }
-
-      // Conflicting value: roll back the optimistic tally and votedMap entry.
-      nextOptimistic.delete(key);
-      nextVotedMap.delete(key);
-      return withTally(serverProposal, tallyKey, serverTally);
-    });
-
-    set({ proposals: reconciled, votedMap: nextVotedMap, optimisticVotes: nextOptimistic });
-  },
-
-  clearOptimisticVote: (proposalId) => {
-    const { proposals, votedMap, optimisticVotes } = get();
-    const key = String(proposalId);
-    const optimistic = optimisticVotes.get(key);
-    if (!optimistic) return;
-
-    const index = proposals.findIndex((p) => String(p.id) === key);
-    const nextProposals = proposals.slice();
-    if (index !== -1) {
-      const tallyKey: 'yes' | 'no' = optimistic.vote ? 'yes' : 'no';
-      nextProposals[index] = withTally(proposals[index], tallyKey, optimistic.previousTally[tallyKey]);
-    }
-
-    const nextVotedMap = new Map(votedMap);
-    nextVotedMap.delete(key);
-
-    const nextOptimistic = new Map(optimisticVotes);
-    nextOptimistic.delete(key);
-
-    set({ proposals: nextProposals, votedMap: nextVotedMap, optimisticVotes: nextOptimistic });
+  setPage: (page) => {
+    const { proposals, pageSize } = get();
+    const totalPages = Math.max(1, Math.ceil(proposals.length / Math.max(1, pageSize)));
+    const safePage = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+    set({ currentPage: safePage });
   },
 }));
