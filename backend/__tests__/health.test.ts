@@ -66,6 +66,43 @@ describe('health endpoints', () => {
     expect(headers['referrer-policy']).toBe('strict-origin');
   });
 
+  it('returns build metadata from /version without authentication', async () => {
+    const previous = {
+      version: process.env.APP_VERSION,
+      commitSha: process.env.GIT_COMMIT_SHA,
+      buildDate: process.env.BUILD_DATE,
+    };
+    process.env.APP_VERSION = '1.2.3';
+    process.env.GIT_COMMIT_SHA = 'abc123def';
+    process.env.BUILD_DATE = '2024-01-02T03:04:05Z';
+
+    try {
+      server = createHealthServer(async () => true);
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+      const result = await request(server, '/version');
+
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({
+        version: '1.2.3',
+        commitSha: 'abc123def',
+        buildDate: '2024-01-02T03:04:05Z',
+      });
+    } finally {
+      for (const [key, value] of Object.entries({
+        APP_VERSION: previous.version,
+        GIT_COMMIT_SHA: previous.commitSha,
+        BUILD_DATE: previous.buildDate,
+      })) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('sets security headers on readiness responses, including 503', async () => {
     let ready = true;
     server = createHealthServer(async () => ready);

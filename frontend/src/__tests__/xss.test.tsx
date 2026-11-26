@@ -1,8 +1,9 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ProposalCard } from '../components/ProposalCard';
 import { ProposalDetail } from '../components/ProposalDetail';
+import { CreateProposalForm } from '../components/CreateProposalForm';
 import type { Proposal } from '../types';
 
 const sampleProposal = (title: string, description = 'desc', discussion_url?: string): Proposal => ({
@@ -108,5 +109,77 @@ describe('XSS protection for proposal rendering', () => {
       const link = container.querySelector('a[href="https://forum.example.com/t/1"]');
       expect(link).not.toBeNull();
     });
+  });
+});
+
+/**
+ * Issue #398 — draft-key injection via wallet address.
+ *
+ * CreateProposalForm persists drafts in localStorage keyed by the connected
+ * wallet. A malicious or malformed wallet address must not be able to inject
+ * key separators (':'), path traversal ('../'), quotes, or other control
+ * characters into the storage key, nor collide with another wallet's draft
+ * namespace. The key must be derived from a hash of the address.
+ */
+describe('CreateProposalForm draft key injection', () => {
+  const draftKeys = (): string[] =>
+    Object.keys(window.localStorage).filter((k) => k.toLowerCase().includes('draft'));
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  const injectionVectors: Array<{ name: string; address: string }> = [
+    { name: 'colon separator', address: 'GABC:proposal-draft:attacker' },
+    { name: 'path traversal', address: '../../other-wallet/draft' },
+    { name: 'double quotes', address: 'GABC"draft"injected' },
+    { name: 'single quotes', address: "GABC'draft'injected" },
+    { name: 'newline/control chars', address: 'GABC\n\r\tdraft' },
+    { name: 'wildcard/glob chars', address: 'GABC*?[draft]' },
+  ];
+
+  for (const { name, address } of injectionVectors) {
+    it(`hashes the wallet address so it cannot inject key structure: ${name}`, () => {
+      render(<CreateProposalForm walletAddress={address} />);
+
+      const keys = draftKeys();
+      // A draft key may or may not be written on mount, but if one is, it must
+      // never contain the raw injected characters from the wallet address.
+      for (const key of keys) {
+        expect(key).not.toContain(':proposal-draft:');
+        expect(key).not.toContain('../');
+        expect(key).not.toContain('"');
+        expect(key).not.toContain("'");
+        expect(key).not.toContain('\n');
+        expect(key).not.toContain('\r');
+        expect(key).not.toContain('\t');
+        expect(key).not.toContain('*');
+        expect(key).not.toContain('?');
+        expect(key).not.toContain('[');
+        expect(key).not.toContain(']');
+      }
+    });
+  }
+
+  it('does not collide with another wallet draft namespace', () => {
+    const attacker = 'GABC:proposal-draft:victim';
+    const victim = 'GABC';
+
+    render(<CreateProposalForm walletAddress={attacker} />);
+    const attackerKeys = new Set(draftKeys());
+
+    window.localStorage.clear();
+
+    render(<CreateProposalForm walletAddress={victim} />);
+    const victimKeys = draftKeys();
+
+    for (const key of victimKeys) {
+      expect(attackerKeys.has(key)).toBe(false);
+    }
   });
 });

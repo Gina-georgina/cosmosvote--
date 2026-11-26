@@ -5,8 +5,7 @@ import { NotificationService } from './notificationService';
 import { logger } from './logger';
 import { requestContext } from './requestContext';
 import helmet from 'helmet';
-import { randomUUID } from 'crypto';
-import type { IncomingMessage, ServerResponse } from 'http';
+import compression from 'compression';
 
 // Validate env vars before anything else — fails fast with a clear message.
 const env = loadEnv();
@@ -36,25 +35,40 @@ const securityHeaders = helmet({
   referrerPolicy: { policy: 'strict-origin' },
 });
 
-// Request-ID middleware. Generates (or echoes) a correlation ID per request,
-// exposes it via AsyncLocalStorage so logger.ts can include it in every log
-// line, and sets the `X-Request-Id` response header on every response.
-export function requestIdMiddleware(
-  req: IncomingMessage,
-  res: ServerResponse,
-  next: () => void,
-): void {
-  const incoming = req.headers['x-request-id'];
-  const requestId =
-    (Array.isArray(incoming) ? incoming[0] : incoming) || randomUUID();
-  res.setHeader('X-Request-Id', requestId);
-  requestContext.run({ requestId }, next);
-}
+// Response compression middleware. Negotiates gzip/brotli via the client's
+// Accept-Encoding header, only compresses bodies larger than 1 KB, and skips
+// already-compressed binary content types (images, zip, etc.).
+const compressionMiddleware = compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    const contentType = res.getHeader('Content-Type');
+    if (typeof contentType === 'string') {
+      const type = contentType.toLowerCase();
+      const alreadyCompressed = [
+        'image/',
+        'video/',
+        'audio/',
+        'application/zip',
+        'application/gzip',
+        'application/x-gzip',
+        'application/x-compress',
+        'application/x-rar-compressed',
+        'application/x-7z-compressed',
+        'application/octet-stream',
+      ];
+      if (alreadyCompressed.some((prefix) => type.startsWith(prefix))) {
+        return false;
+      }
+    }
+    // Fall back to the default filter (respects Accept-Encoding, skips HEAD, etc.).
+    return compression.filter(req, res);
+  },
+});
 
 const healthServer = createHealthServer(
   () => service.checkReadiness(),
   securityHeaders,
-  requestIdMiddleware,
+  compressionMiddleware,
 );
 const healthPort = env.HEALTH_PORT;
 healthServer.listen(healthPort, '0.0.0.0', () => {
@@ -64,13 +78,37 @@ healthServer.listen(healthPort, '0.0.0.0', () => {
 service.start();
 logger.info({ event: 'startup' }, 'notification service started');
 
-export { requestContext };
+// Maximum time to wait for in-flight HTTP requests to finish before forcing
+// the process to exit. Prevents a stuck connection from blocking shutdown
+// indefinitely (e.g. during a rolling deploy or container restart).
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 10000);
+
+function closeServerWithTimeout(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      logger.warn(
+        { event: 'shutdown_timeout', timeoutMs },
+        'forcing shutdown: in-flight requests did not complete in time'
+      );
+      resolve();
+    }, timeoutMs);
+
+    healthServer.close(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
 
 async function shutdown() {
   logger.info({ event: 'shutdown' }, 'notification service stopping');
   service.stop();
-  healthServer.close();
-  await auditLogger.flush();
+  await closeServerWithTimeout(SHUTDOWN_TIMEOUT_MS);
   await flushErrorTracking();
   process.exit(0);
 }

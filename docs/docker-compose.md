@@ -14,6 +14,7 @@ This guide covers running the full CosmosVote stack locally using Docker Compose
 | `dev` | Builder image — full Rust toolchain for development and testing | — |
 | `stellar-node` | Local Stellar node with Soroban RPC enabled | `8001:8000` |
 | `rpc-proxy` | Nginx reverse proxy in front of the Stellar RPC | `8000:8000` |
+| `faucet` | Faucet service — signs and submits testnet funding transactions | `3000:3000` |
 | `artifacts` | Minimal runtime image shipping WASM artifacts only (profile: `artifacts`) | — |
 
 ## Environment Variables
@@ -32,10 +33,40 @@ Key variables used by Docker Compose:
 | `STELLAR_RPC_URL` | `http://stellar-node:8000` | Soroban RPC endpoint (within Compose network) |
 | `STELLAR_NETWORK_PASSPHRASE` | `Standalone Network ; February 2021` | Must match the running node |
 | `STELLAR_SECRET_KEY` | — | Admin secret key for deployment scripts |
+| `FAUCET_SECRET_KEY_FILE` | `/run/secrets/faucet_secret_key` | Path to the file containing the faucet signing keypair (mounted via Compose `secrets:`) |
 | `GOVERNANCE_CONTRACT_ID` | — | Populated after running `deploy.sh` |
 | `TOKEN_CONTRACT_ID` | — | Populated after running `deploy.sh` |
 
 > The `dev` service injects `STELLAR_RPC_URL` and `STELLAR_NETWORK_PASSPHRASE` automatically. You do not need to set them in `.env` for local development.
+
+### Faucet secret
+
+The faucet signing keypair is **not** passed via an environment variable. Instead, the `faucet` service reads it from a file whose path is given by `FAUCET_SECRET_KEY_FILE`. Docker Compose mounts the secret read-only at `/run/secrets/faucet_secret_key`:
+
+```yaml
+services:
+  faucet:
+    environment:
+      FAUCET_SECRET_KEY_FILE: /run/secrets/faucet_secret_key
+    secrets:
+      - faucet_secret_key
+
+secrets:
+  faucet_secret_key:
+    file: ./secrets/faucet_secret_key.txt
+```
+
+Create the secret file locally (the `secrets/` directory is git-ignored — never commit it):
+
+```bash
+mkdir -p secrets
+printf '%s' 'SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' > secrets/faucet_secret_key.txt
+chmod 600 secrets/faucet_secret_key.txt
+```
+
+The file is mounted read-only at `/run/secrets/faucet_secret_key` inside the container, so it is never exposed through `/proc/<pid>/environ`, logs, or crash dumps. The key is never logged, even at `DEBUG` level.
+
+> **Deprecated:** the `FAUCET_ADMIN_SECRET_KEY` environment variable is still accepted as a fallback for local development only and emits a deprecation warning at startup. Do not use it — prefer `FAUCET_SECRET_KEY_FILE` (or AWS Secrets Manager in production).
 
 ## Quick Start
 

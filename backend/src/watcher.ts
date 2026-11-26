@@ -28,6 +28,8 @@ function resolveMaxRetries(config: WatcherConfig): number {
   return DEFAULT_MAX_RETRIES;
 }
 
+const SEEN_EVENTS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface ContractEvent {
   id: string;
   pagingToken: string;
@@ -59,6 +61,7 @@ export class ContractWatcher {
     this.running = true;
     this.attempt = 0;
     this.cursor = await this.loadCursor();
+    await this.pruneSeenEvents();
     logger.info('ContractWatcher started', { cursor: this.cursor });
     await this.poll();
   }
@@ -84,6 +87,7 @@ export class ContractWatcher {
     if (!this.running) return;
     let delayMs = this.config.pollIntervalMs;
     try {
+      await this.pruneSeenEvents();
       const events = await this.fetchEvents();
       this.attempt = 0;
       for (const event of events) {
@@ -151,11 +155,29 @@ export class ContractWatcher {
 
   private async handleEvent(event: ContractEvent): Promise<void> {
     try {
+      const inserted = await db.markEventSeen(event.ledger, event.id);
+      if (!inserted) {
+        logger.debug('ContractWatcher skipping duplicate event', {
+          ledger: event.ledger,
+          id: event.id,
+        });
+        this.cursor = event.pagingToken;
+        await this.saveCursor(this.cursor);
+        return;
+      }
       await db.saveContractEvent(event);
       this.cursor = event.pagingToken;
       await this.saveCursor(this.cursor);
     } catch (err) {
       logger.error('ContractWatcher failed to handle event', { error: err, event });
+    }
+  }
+
+  private async pruneSeenEvents(): Promise<void> {
+    try {
+      await db.pruneSeenEvents(SEEN_EVENTS_RETENTION_MS);
+    } catch (err) {
+      logger.error('ContractWatcher failed to prune seen events', { error: err });
     }
   }
 

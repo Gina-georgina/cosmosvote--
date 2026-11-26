@@ -10,25 +10,36 @@ interface ProposalState {
   progress: { loaded: number; total: number } | null;
   /** Map from proposal id (as string) to the connected user's vote record */
   votedMap: Map<string, VoteRecord>;
-  /** Scroll offset (px) of the virtualised proposal list, used to restore position */
-  proposalScrollOffset: number;
+  /** Current page of the proposal list (1-based) */
+  currentPage: number;
+  /** Number of proposals displayed per page */
+  pageSize: number;
 
   // Actions
   loadProposals: () => Promise<void>;
   loadVotesForUser: (walletAddress: string) => Promise<void>;
   clearVotes: () => void;
-  setProposalScrollOffset: (offset: number) => void;
-  restoreProposalScrollOffset: () => void;
+  setPage: (page: number) => void;
 }
 
-const SCROLL_STORAGE_PREFIX = 'proposalScrollOffset';
+export const DEFAULT_PAGE_SIZE = 10;
 
-/** Build a sessionStorage key scoped to the current page/filter. */
-function scrollStorageKey(): string {
-  if (typeof window === 'undefined') return SCROLL_STORAGE_PREFIX;
-  const { pathname, search } = window.location;
-  return `${SCROLL_STORAGE_PREFIX}:${pathname}${search}`;
-}
+/** Returns the slice of proposals belonging to the given 1-based page. */
+export const getPageProposals = (
+  proposals: Proposal[],
+  page: number,
+  pageSize: number = DEFAULT_PAGE_SIZE
+): Proposal[] => {
+  const safeSize = Math.max(1, Math.floor(pageSize));
+  const totalPages = Math.max(1, Math.ceil(proposals.length / safeSize));
+  const safePage = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+  const start = (safePage - 1) * safeSize;
+  return proposals.slice(start, start + safeSize);
+};
+
+/** Selector hook returning the proposals for the current page. */
+export const usePaginatedProposals = (): Proposal[] =>
+  useProposalStore((state) => getPageProposals(state.proposals, state.currentPage, state.pageSize));
 
 export const useProposalStore = create<ProposalState>((set, get) => ({
   proposals: [],
@@ -37,7 +48,8 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
   error: null,
   progress: null,
   votedMap: new Map(),
-  proposalScrollOffset: 0,
+  currentPage: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
 
   loadProposals: async () => {
     set({ loading: true, error: null, progress: null });
@@ -70,24 +82,10 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
 
   clearVotes: () => set({ votedMap: new Map() }),
 
-  setProposalScrollOffset: (offset) => {
-    set({ proposalScrollOffset: offset });
-    if (typeof window === 'undefined') return;
-    try {
-      window.sessionStorage.setItem(scrollStorageKey(), String(offset));
-    } catch {
-      // sessionStorage may be unavailable (private mode, quota); ignore.
-    }
-  },
-
-  restoreProposalScrollOffset: () => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = window.sessionStorage.getItem(scrollStorageKey());
-      const offset = stored !== null ? Number(stored) : 0;
-      set({ proposalScrollOffset: Number.isFinite(offset) ? offset : 0 });
-    } catch {
-      set({ proposalScrollOffset: 0 });
-    }
+  setPage: (page) => {
+    const { proposals, pageSize } = get();
+    const totalPages = Math.max(1, Math.ceil(proposals.length / Math.max(1, pageSize)));
+    const safePage = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+    set({ currentPage: safePage });
   },
 }));

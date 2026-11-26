@@ -1,6 +1,7 @@
 import type { Proposal, VoteRecord } from '../types';
 import { formatTokenAmount } from '../utils';
 import { DelegationPanel } from './DelegationPanel';
+import { ErrorBoundary } from './ErrorBoundary';
 import { NotificationPreferences } from './NotificationPreferences';
 
 interface Props {
@@ -160,7 +161,7 @@ export function UserDashboard({
       )}
 
       {/* Delegation management */}
-      <DelegationPanel walletAddress={walletAddress} />
+      <ErrorBoundary><DelegationPanel walletAddress={walletAddress} /></ErrorBoundary>
 
       {/* Notification preferences */}
       <NotificationPreferences walletAddress={walletAddress} />

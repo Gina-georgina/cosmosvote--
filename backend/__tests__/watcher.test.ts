@@ -138,6 +138,50 @@ describe('EventWatcher', () => {
     });
   });
 
+  describe('event deduplication', () => {
+    it('does not dispatch the same event twice', async () => {
+      const handler = jest.fn();
+      watcher.onEvent(handler);
+
+      const duplicateEvent = {
+        id: '1',
+        pagingToken: 'cursor-1',
+        ledger: 100,
+        txHash: 'tx-abc',
+        topic: ['transfer'],
+      };
+
+      mockedFetch
+        .mockResolvedValueOnce([duplicateEvent])
+        .mockResolvedValueOnce([duplicateEvent]);
+
+      watcher.start();
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(1000);
+
+      expect(mockedFetch).toHaveBeenCalledTimes(2);
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ id: '1', txHash: 'tx-abc' })
+      );
+    });
+
+    it('prunes seen events older than 7 days and keeps recent ones', async () => {
+      const now = Date.now();
+      const eightDaysAgo = now - 8 * 24 * 60 * 60 * 1000;
+      const oneDayAgo = now - 1 * 24 * 60 * 60 * 1000;
+
+      const store = watcher.getSeenEventsStore();
+      store.set('100:tx-old', eightDaysAgo);
+      store.set('101:tx-recent', oneDayAgo);
+
+      watcher.pruneSeenEvents();
+
+      expect(store.has('100:tx-old')).toBe(false);
+      expect(store.has('101:tx-recent')).toBe(true);
+    });
+  });
+
   describe('error handling', () => {
     it('logs Horizon client errors and keeps polling', async () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
