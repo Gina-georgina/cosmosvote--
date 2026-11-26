@@ -6,7 +6,8 @@
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 use cosmosvote_token::{TokenContract, TokenContractClient};
 use cosmosvote_governance::{GovernanceContract, GovernanceContractClient};
-use cosmosvote_governance::types::{Vote, ProposalState};
+use cosmosvote_governance::types::{Vote, ProposalState, TreasuryAction, TreasuryAsset};
+use cosmosvote_treasury::{TreasuryContract, TreasuryContractClient};
 
 // ---------------------------------------------------------------------------
 // Setup Helpers
@@ -46,6 +47,61 @@ fn setup_contracts(env: &Env) -> (GovernanceContractClient<'_>, TokenContractCli
     );
 
     (gov, token, admin, voter1, voter2, voter3)
+}
+
+/// Initialize governance with a treasury contract wired in, and fund the treasury.
+fn setup_treasury_contracts(
+    env: &Env,
+) -> (
+    GovernanceContractClient<'_>,
+    TokenContractClient<'_>,
+    TreasuryContractClient<'_>,
+    Address,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
+    env.mock_all_auths();
+
+    let admin = Address::generate(env);
+    let voter1 = Address::generate(env);
+    let voter2 = Address::generate(env);
+    let voter3 = Address::generate(env);
+
+    // Initialize token contract
+    let token_id = env.register(TokenContract, ());
+    let token = TokenContractClient::new(env, &token_id);
+    token.initialize(&admin, &10_000_000i128);
+
+    // Distribute tokens to voters
+    token.mint(&admin, &voter1, &3_000_000i128); // 30%
+    token.mint(&admin, &voter2, &2_000_000i128); // 20%
+    token.mint(&admin, &voter3, &1_000_000i128); // 10%
+
+    // Initialize treasury contract
+    let treasury_id = env.register(TreasuryContract, ());
+    let treasury = TreasuryContractClient::new(env, &treasury_id);
+    treasury.initialize(&admin, &token_id);
+
+    // Fund the treasury
+    token.mint(&admin, &treasury_id, &5_000_000i128);
+
+    // Initialize governance contract with treasury wired in
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(env, &gov_id);
+    gov.initialize(
+        &admin,
+        &token_id,
+        &1000000i128, // min_proposal_balance
+        &0u64,        // proposal_cooldown
+        &100u32,      // min_quorum_bps (1%)
+        &false,       // restrict_admin_vote
+        &Some(treasury_id.clone()),
+        &0u32,        // concentration_threshold_bps (0 = disabled)
+    );
+
+    (gov, token, treasury, admin, voter1, voter2, voter3, treasury_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +214,79 @@ fn test_full_lifecycle_cancel() {
     
     let proposal = gov.get_proposal(id).expect("should get finalized proposal");
     assert_eq!(proposal.state, ProposalState::Cancelled);
+}
+
+// ---------------------------------------------------------------------------
+// Governance + Treasury Disbursement Flow (Issue #467)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_full_lifecycle_governance_treasury_disbursement() {
+    let env = Env::default();
+    let (gov, token, treasury, _admin, voter1, voter2, voter3, treasury_id) =
+        setup_treasury_contracts(&env);
+
+    let recipient = Address::generate(&env);
+    let disbursement_amount = 1_000_000i128;
+
+    // 1. Verify initial balances
+    let treasury_balance_before = token.balance(&treasury_id);
+    assert_eq!(treasury_balance_before, 5_000_000i128);
+    assert_eq!(token.balance(&recipient), 0i128);
+
+    // 2. Create proposal carrying a TreasuryAction
+    let action = TreasuryAction {
+        recipient: recipient.clone(),
+        amount: disbursement_amount,
+        asset: TreasuryAsset::Token(token.address.clone()),
+    };
+
+    let id = gov
+        .create_proposal(
+            &voter1,
+            &String::from_str(&env, "Treasury disbursement"),
+            &String::from_str(&env, "Disburse funds to recipient"),
+            &5_000_000i128, // quorum
+            &604_800u64,    // 7 days
+            &Some(action),
+        )
+        .expect("should create proposal");
+
+    assert_eq!(id, 0);
+
+    // 3. Cast passing votes
+    gov.cast_vote(&voter1, &id, &Vote::Yes).expect("voter1 votes yes");
+    gov.cast_vote(&voter2, &id, &Vote::Yes).expect("voter2 votes yes");
+    gov.cast_vote(&voter3, &id, &Vote::No).expect("voter3 votes no");
+
+    let proposal = gov.get_proposal(id).expect("should get proposal");
+    assert_eq!(proposal.votes_yes, 5_000_000i128);
+    assert_eq!(proposal.votes_no, 1_000_000i128);
+
+    // 4. Advance ledger past the voting period and finalize
+    env.ledger().with_mut(|ledger| {
+        ledger.set_timestamp(proposal.end_time + 1);
+    });
+
+    gov.finalize_proposal(&id).expect("should finalize proposal");
+    let proposal = gov.get_proposal(id).expect("should get finalized proposal");
+    assert_eq!(proposal.state, ProposalState::Passed);
+
+    // 5. Execute proposal - should trigger treasury disbursement
+    gov.execute_proposal(&id).expect("should execute proposal");
+    let proposal = gov.get_proposal(id).expect("should get executed proposal");
+    assert_eq!(proposal.state, ProposalState::Executed);
+
+    // 6. Verify treasury balance decremented and recipient balance incremented
+    let treasury_balance_after = token.balance(&treasury_id);
+    assert_eq!(
+        treasury_balance_after,
+        treasury_balance_before - disbursement_amount
+    );
+    assert_eq!(token.balance(&recipient), disbursement_amount);
+
+    // Sanity check: treasury client reports the same balance
+    assert_eq!(treasury.balance(&token.address), treasury_balance_after);
 }
 
 // ---------------------------------------------------------------------------

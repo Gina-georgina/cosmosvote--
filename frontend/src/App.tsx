@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import type { Proposal, ProposalState, VoteRecord } from './types';
 import { fetchAllProposals, fetchTokenDecimals, checkRpcReachability } from './api';
 import { ProposalCard } from './components/ProposalCard';
@@ -11,19 +11,22 @@ import { Pagination } from './components/Pagination';
 import { ConnectWalletModal } from './components/ConnectWalletModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AriaLive } from './components/AriaLive';
-import { GovernanceAnalytics } from './components/GovernanceAnalytics';
 import { ACTIVE_NETWORK } from './config';
 import { formatTokenAmount, maskAddress } from './utils';
 import { useTheme } from './useTheme';
 import { useMeta } from './useMeta';
 import { useWallet } from './WalletContext';
 import { useProposalStore } from './store/proposalStore';
-import { useDebounce } from './hooks/useDebounce';
-import en from './locales/en.json';
+import { useI18n } from './I18nContext';
 import './responsive.css';
 
+// Lazy-loaded heavy tab components (Issue #396) — split into separate chunks so
+// they are only fetched when the user actually visits the relevant tab.
+const GovernanceAnalytics = lazy(() => import('./components/GovernanceAnalytics'));
+const DelegationPanel = lazy(() => import('./components/DelegationPanel'));
+
 const ALL_STATES: ProposalState[] = ['Active', 'Passed', 'Rejected', 'Executed', 'Cancelled'];
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 // Admin address — in production this would come from the contract or environment config
 const ADMIN_ADDRESS = import.meta.env.VITE_ADMIN_ADDRESS ?? null;
@@ -31,6 +34,8 @@ const ADMIN_ADDRESS = import.meta.env.VITE_ADMIN_ADDRESS ?? null;
 type AppTab = 'proposals' | 'dashboard' | 'treasury';
 
 export default function App() {
+  const { t } = useI18n();
+
   // Wallet state comes exclusively from WalletContext (backed by Zustand walletStore).
   // No local wallet state duplicates are created here.
   const { walletAddress, tokenBalance, showModal, openModal, disconnect } = useWallet();
@@ -50,7 +55,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
 
-  // ── URL-synced search / filter / page state (Issue #17 + #19) ───────────
+  // ── URL-synced search / filter / page state (Issue #17 + #19 + #377) ───
   // Initialise from query string so deep links and browser back/forward work.
   const params = new URLSearchParams(window.location.search);
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -62,19 +67,18 @@ export default function App() {
   // Debounced search — 300 ms delay (Issue #17)
   const debouncedSearch = useDebounce(search, 300);
 
-  // Sync search + stateFilter to URL without triggering a navigation (Issue #17)
+  // Sync search + stateFilter + page to URL without triggering a navigation (Issue #17 + #377)
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (debouncedSearch) sp.set('q', debouncedSearch); else sp.delete('q');
     if (stateFilter !== 'All') sp.set('state', stateFilter); else sp.delete('state');
-    // preserve page
     if (page > 1) sp.set('page', String(page)); else sp.delete('page');
     const newSearch = sp.toString();
     const newUrl = newSearch ? `?${newSearch}` : window.location.pathname;
     window.history.replaceState(null, '', newUrl);
   }, [debouncedSearch, stateFilter, page]);
 
-  // Restore state from URL on popstate (browser back/forward) (Issue #17)
+  // Restore state from URL on popstate (browser back/forward) (Issue #17 + #377)
   useEffect(() => {
     const onPop = () => {
       const sp = new URLSearchParams(window.location.search);
@@ -104,10 +108,10 @@ export default function App() {
   const { canInstall, install, dismiss } = usePWAInstall();
 
   useMeta(
-    selected ? selected.title : 'Proposals',
+    selected ? selected.title : t('app.meta.title'),
     selected
       ? `${selected.title} — ${selected.description.slice(0, 120)}`
-      : 'Browse and vote on on-chain governance proposals for CosmosVote on Stellar Soroban.'
+      : t('app.meta.description')
   );
 
   useEffect(() => {
@@ -118,14 +122,14 @@ export default function App() {
       .then(([props, decs]) => {
         setProposals(props);
         setDecimals(decs);
-        setAnnouncement(`${props.length} proposal${props.length !== 1 ? 's' : ''} loaded.`);
+        setAnnouncement(t('app.announce.proposalsLoaded', { count: props.length }));
       })
       .catch(e => {
         setError(String(e));
         setAnnouncement('');
       })
       .finally(() => { setLoading(false); setProgress(null); });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     checkRpcReachability().catch(err => {
@@ -145,6 +149,9 @@ export default function App() {
     }
   }, [loading, proposals]);
 
+  // Filter computation memoised on the inputs that actually affect the result
+  // set (Issue #389). Unrelated state changes (polling updates, theme, etc.)
+  // do not recompute this.
   const filtered = useMemo(() => {
     return proposals.filter(p => {
       const matchState = stateFilter === 'All' || p.state === stateFilter;
@@ -165,6 +172,7 @@ export default function App() {
   // Clamp current page if filtered results shrink (e.g. after a search)
   const safePage = Math.min(page, totalPages);
 
+  // Pagination slice memoised on filtered/safePage (Issue #389).
   const pagedProposals = useMemo(() => {
     const start = (safePage - 1) * PAGE_SIZE;
     return filtered.slice(start, start + PAGE_SIZE);
@@ -175,12 +183,12 @@ export default function App() {
 
   const goToPage = (next: number) => {
     setPage(next);
-    setPageAnnouncement(`Page ${next} of ${totalPages}`);
+    setPageAnnouncement(t('app.announce.page', { page: next, total: totalPages }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleProposalCreated = (id: number) => {
-    setAnnouncement(`Proposal #${id} created. Refreshing list…`);
+    setAnnouncement(t('app.announce.proposalCreated', { id }));
     fetchAllProposals().then(setProposals).catch(() => {});
   };
 
@@ -211,24 +219,24 @@ export default function App() {
       {/* Header */}
       <header style={{ background: 'var(--bg-header)', color: 'var(--text-header)', padding: '1rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.5rem' }}>🌌 CosmosVote</h1>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-header-sub)' }}>On-chain governance · {ACTIVE_NETWORK}</span>
+          <h1 style={{ margin: 0, fontSize: '1.5rem' }}>🌌 {t('app.title')}</h1>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-header-sub)' }}>{t('app.subtitle', { network: ACTIVE_NETWORK })}</span>
         </div>
         {ACTIVE_NETWORK === 'testnet' && (
-          <a href="/faucet" style={{ color: 'var(--text-header)', fontSize: '0.875rem' }}>Get Test Tokens</a>
+          <a href="/faucet" style={{ color: 'var(--text-header)', fontSize: '0.875rem' }}>{t('app.getTestTokens')}</a>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {/* PWA install banner — shown on supported browsers (Issue #24) */}
           {canInstall && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(74,144,226,0.15)', border: '1px solid #4A90E2', borderRadius: 6, padding: '0.25rem 0.6rem' }}>
               <span style={{ fontSize: '0.8rem' }}>📲</span>
-              <button onClick={install} style={{ background: '#4A90E2', color: '#fff', border: 'none', borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.75rem' }}>Install</button>
-              <button onClick={dismiss} aria-label="Dismiss install prompt" style={{ background: 'none', border: 'none', color: 'var(--text-header-sub)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 0.2rem' }}>✕</button>
+              <button onClick={install} style={{ background: '#4A90E2', color: '#fff', border: 'none', borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.75rem' }}>{t('app.install')}</button>
+              <button onClick={dismiss} aria-label={t('app.dismissInstallPrompt')} style={{ background: 'none', border: 'none', color: 'var(--text-header-sub)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 0.2rem' }}>✕</button>
             </div>
           )}
           <button
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-label={t('app.theme.switchTo', { mode: theme === 'dark' ? t('app.theme.light') : t('app.theme.dark') })}
             aria-pressed={theme === 'dark'}
             style={{
               background: 'none',
@@ -246,16 +254,16 @@ export default function App() {
           >
             {theme === 'dark' ? '☀️' : '🌙'}
             <span style={{ marginLeft: '0.3rem', fontSize: '0.75rem' }}>
-              {theme === 'dark' ? 'Light' : 'Dark'}
+              {theme === 'dark' ? t('app.theme.light') : t('app.theme.dark')}
             </span>
           </button>
           {walletAddress ? (
             <div style={{ textAlign: 'right' }}>
               <div
                 style={{ fontSize: '0.75rem', color: 'var(--text-header-sub)', cursor: 'pointer', userSelect: 'none' }}
-                title={showFullAddress ? 'Click to hide address' : walletAddress}
+                title={showFullAddress ? t('app.wallet.hideAddress') : walletAddress}
                 onClick={() => setShowFullAddress(s => !s)}
-                aria-label={showFullAddress ? 'Click to hide full address' : 'Click to reveal full address'}
+                aria-label={showFullAddress ? t('app.wallet.hideFullAddress') : t('app.wallet.revealFullAddress')}
                 role="button"
                 tabIndex={0}
                 onKeyDown={e => e.key === 'Enter' && setShowFullAddress(s => !s)}
@@ -271,7 +279,7 @@ export default function App() {
                 onClick={disconnect}
                 style={{ marginTop: '0.25rem', background: 'none', color: '#94a3b8', border: '1px solid #475569', borderRadius: 4, padding: '0.2rem 0.5rem', cursor: 'pointer', fontSize: '0.7rem' }}
               >
-                Disconnect
+                {t('app.wallet.disconnect')}
               </button>
             </div>
           ) : (
@@ -279,7 +287,7 @@ export default function App() {
               onClick={openModal}
               style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer' }}
             >
-              Connect Wallet
+              {t('app.wallet.connect')}
             </button>
           )}
         </div>
@@ -290,13 +298,13 @@ export default function App() {
 
           {/* ── Tab navigation ── */}
           <nav
-            aria-label="App sections"
+            aria-label={t('app.nav.sections')}
             style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', borderBottom: '2px solid var(--border-color, #e2e8f0)' }}
           >
             {([
-              { id: 'proposals', label: '📋 Proposals' },
-              ...(walletAddress ? [{ id: 'dashboard', label: '👤 Dashboard' }] : []),
-              { id: 'treasury', label: '🏦 Treasury' },
+              { id: 'proposals', label: t('app.tabs.proposals') },
+              ...(walletAddress ? [{ id: 'dashboard', label: t('app.tabs.dashboard') }] : []),
+              { id: 'treasury', label: t('app.tabs.treasury') },
             ] as Array<{ id: AppTab; label: string }>).map(tab => (
               <button
                 key={tab.id}
@@ -325,6 +333,7 @@ export default function App() {
             loadingDashboard
               ? <DashboardSkeleton />
               : (
+                <ErrorBoundary>
                 <UserDashboard
                   walletAddress={walletAddress}
                   tokenBalance={tokenBalance}
@@ -334,6 +343,7 @@ export default function App() {
                   onCreateProposal={() => setActiveTab('proposals')}
                   onDisconnect={disconnect}
                 />
+                </ErrorBoundary>
               )
           )}
 
@@ -344,9 +354,9 @@ export default function App() {
               : (
                 <div
                   style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '1.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}
-                  aria-label="Treasury"
+                  aria-label={t('app.treasury.ariaLabel')}
                 >
-                  <p>💼 Treasury data will appear here once the treasury contract is configured.</p>
+                  <p>{t('app.treasury.placeholder')}</p>
                 </div>
               )
           )}
@@ -357,36 +367,36 @@ export default function App() {
           <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             <input
               type="search"
-              placeholder="Search proposals…"
+              placeholder={t('app.search.placeholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{ flex: 1, minWidth: 200, padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-              aria-label="Search proposals"
+              aria-label={t('app.search.ariaLabel')}
             />
             <select
               value={stateFilter}
               onChange={e => setStateFilter(e.target.value as ProposalState | 'All')}
               style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--input-border)', borderRadius: 6, fontSize: '0.875rem', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-              aria-label="Filter by state"
+              aria-label={t('app.filter.ariaLabel')}
             >
-              <option value="All">All States</option>
-              {ALL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="All">{t('app.filter.allStates')}</option>
+              {ALL_STATES.map(s => <option key={s} value={s}>{t(`proposal.state.${s}`)}</option>)}
             </select>
           </div>
 
           {rpcWarning && (
             <div style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
-              <strong>RPC warning:</strong> {rpcWarning}
+              <strong>{t('app.rpcWarning.label')}</strong> {rpcWarning}
             </div>
           )}
 
           {/* Stats bar */}
           <div className="stats-bar" style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             {[
-              { label: 'Total', count: proposals.length, color: 'var(--text-primary)' },
-              { label: 'Active', count: proposals.filter(p => p.state === 'Active').length, color: '#2563eb' },
-              { label: 'Passed', count: proposals.filter(p => p.state === 'Passed').length, color: '#16a34a' },
-              { label: 'Executed', count: proposals.filter(p => p.state === 'Executed').length, color: '#7c3aed' },
+              { label: t('app.stats.total'), count: proposals.length, color: 'var(--text-primary)' },
+              { label: t('app.stats.active'), count: proposals.filter(p => p.state === 'Active').length, color: '#2563eb' },
+              { label: t('app.stats.passed'), count: proposals.filter(p => p.state === 'Passed').length, color: '#16a34a' },
+              { label: t('app.stats.executed'), count: proposals.filter(p => p.state === 'Executed').length, color: '#7c3aed' },
             ].map(({ label, count, color }) => (
               <div key={label} style={{ background: 'var(--bg-stat)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.5rem 1rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color }}>{count}</div>
@@ -395,14 +405,14 @@ export default function App() {
             ))}
           </div>
 
-          {error && <p style={{ textAlign: 'center', color: '#dc2626', marginBottom: '1rem' }}>Error: {error}</p>}
+          {error && <p style={{ textAlign: 'center', color: '#dc2626', marginBottom: '1rem' }}>{t('app.error.prefix')} {error}</p>}
 
           <div style={{ display: 'grid', gap: '1rem' }}>
             {loading && (
               <>
                 {progress && (
                   <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
-                    Loading proposals… {progress.loaded}/{progress.total}
+                    {t('app.loading.proposals', { loaded: progress.loaded, total: progress.total })}
                   </p>
                 )}
                 <ProposalSkeleton />
@@ -410,47 +420,8 @@ export default function App() {
                 <ProposalSkeleton />
               </>
             )}
-            {!loading && !error && proposals.length === 0 && (
-              <div
-                role="status"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: '3rem 1rem',
-                  background: 'var(--bg-stat, #fff)',
-                  border: '1px dashed var(--border-color, #e2e8f0)',
-                  borderRadius: 10,
-                  textAlign: 'center',
-                }}
-              >
-                <span aria-hidden="true" style={{ fontSize: '3rem', lineHeight: 1 }}>🗳️</span>
-                <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 600 }}>
-                  {en.emptyState.title}
-                </p>
-                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem', maxWidth: 420 }}>
-                  {en.emptyState.message}
-                </p>
-                {walletAddress ? (
-                  <button
-                    onClick={() => setActiveTab('proposals')}
-                    style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.875rem' }}
-                  >
-                    {en.emptyState.createProposal}
-                  </button>
-                ) : (
-                  <button
-                    onClick={openModal}
-                    style={{ background: 'none', color: '#2563eb', border: '1px solid #2563eb', borderRadius: 6, padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.875rem' }}
-                  >
-                    {en.emptyState.connectWallet}
-                  </button>
-                )}
-              </div>
-            )}
-            {!loading && !error && proposals.length > 0 && filtered.length === 0 && (
-              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No proposals found.</p>
+            {!loading && !error && filtered.length === 0 && (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{t('app.empty.noProposals')}</p>
             )}
             {!loading && pagedProposals.map(p => (
               <ProposalCard
@@ -473,14 +444,15 @@ export default function App() {
               totalPages={totalPages}
               totalCount={filtered.length}
               pageSize={PAGE_SIZE}
-              onPrev={() => goToPage(Math.max(1, safePage - 1))}
-              onNext={() => goToPage(Math.min(totalPages, safePage + 1))}
+              onPrev={() => goToPage(safePage - 1)}
+              onNext={() => goToPage(safePage + 1)}
               onPage={goToPage}
             />
           )}
 
-          {/* ── Governance Analytics (Issue #129) ── */}
+          {/* ── Governance Analytics (Issue #129) — lazy-loaded (Issue #396) ── */}
           {!loading && proposals.length > 0 && (
+            <ErrorBoundary>
             <GovernanceAnalytics
               proposals={proposals}
               decimals={decimals}
@@ -489,6 +461,7 @@ export default function App() {
                 fetchAllProposals().then(setProposals).catch(() => {})
               }
             />
+            </ErrorBoundary>
           )}
         </main>
       </ErrorBoundary>
@@ -509,7 +482,7 @@ export default function App() {
           rel="noopener noreferrer"
           style={{ color: '#60a5fa', textDecoration: 'underline' }}
         >
-          Analytics &amp; Privacy Policy
+          {t('app.footer.analyticsPolicy')}
         </a>
       </footer>
 

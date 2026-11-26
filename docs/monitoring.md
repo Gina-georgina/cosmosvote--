@@ -73,7 +73,69 @@ fetch(process.env.SLACK_WEBHOOK_URL, {
 // PagerDuty, email, SNS, etc.
 ```
 
+## Grafana / Prometheus Alerting Rules
+
+In addition to the off-chain monitor above, alerting rules are exported as code in
+`monitoring/alerts.yml` and visualised via `monitoring/grafana-dashboard.json`.
+These rules cover critical governance and infrastructure events and are evaluated
+by Prometheus (or Grafana's managed alerting) on a short interval.
+
+### Alert Rules
+
+| Alert | Expression / Condition | Threshold | Severity | For |
+|-------|------------------------|-----------|----------|-----|
+| `RpcErrorRateHigh` | `rate(rpc_requests_total{status=~"5.."}[5m]) / rate(rpc_requests_total[5m])` | > 5% | `critical` | 5m |
+| `NoProposalsFinalised` | `increase(governance_proposals_finalised_total[24h])` while `governance_active_proposals > 0` | 0 finalised in 24h with active proposals | `warning` | 24h |
+| `FaucetErrorRateHigh` | `rate(faucet_claims_total{status="error"}[5m]) / rate(faucet_claims_total[5m])` | > 10% | `critical` | 5m |
+
+Each rule carries `labels` (including `severity` and `team: cosmosvote`) and
+`annotations` (`summary` and `description`) so notifications are self-explanatory.
+
+### Loading the Rules
+
+`monitoring/alerts.yml` is a standard Prometheus rule file. Point Prometheus at it
+via `rule_files` in `prometheus.yml`:
+
+```yaml
+rule_files:
+  - /etc/prometheus/alerts.yml
+```
+
+Or, if using Grafana-managed alerting, import the file through the Grafana
+provisioning directory (`/etc/grafana/provisioning/alerting/`). Reload Prometheus
+after changes with `curl -X POST http://localhost:9090/-/reload` (or send `SIGHUP`).
+
+### Routing Notifications
+
+Alerts are routed to the team via Alertmanager. Configure a receiver for the team
+webhook and/or email in `alertmanager.yml`:
+
+```yaml
+route:
+  receiver: team-notifications
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: team-notifications
+    webhook_configs:
+      - url: ${TEAM_WEBHOOK_URL}      # e.g. Slack/Teams incoming webhook
+        send_resolved: true
+    email_configs:
+      - to: ${TEAM_ALERT_EMAIL}       # e.g. oncall@example.com
+        from: alerts@example.com
+        smarthost: smtp.example.com:587
+        send_resolved: true
+```
+
+Set `TEAM_WEBHOOK_URL` and `TEAM_ALERT_EMAIL` in the Alertmanager environment.
+Critical alerts (`RpcErrorRateHigh`, `FaucetErrorRateHigh`) should page on-call;
+the `NoProposalsFinalised` warning can route to a lower-priority channel.
+
 ## Running in Production
+=======
 
 For continuous operation, run the script under a process manager:
 

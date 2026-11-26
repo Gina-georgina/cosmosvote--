@@ -83,10 +83,15 @@ export async function metricsHandler(
 
   try {
     const content = await registry.metrics();
-    res.writeHead(200, { 'Content-Type': registry.contentType });
+    // Use a compressible text content type so the compression middleware
+    // (gzip/brotli) can shrink large metrics payloads. The Prometheus text
+    // exposition format is plain text; append charset for correctness.
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+    });
     res.end(content);
   } catch (err) {
-    res.writeHead(500);
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Internal Server Error');
   }
 }
