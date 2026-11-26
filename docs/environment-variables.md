@@ -120,7 +120,9 @@ The optional token faucet is only for testnet and staging. **Never use a mainnet
 | `FAUCET_PORT` | ❌ | `3001` | TCP port for the faucet server. |
 | `FAUCET_ALLOWED_ORIGIN` | ❌ | — | CORS `Access-Control-Allow-Origin` header value for the faucet (e.g. `https://your-frontend.example`). |
 | `FAUCET_TOKEN_CONTRACT_ID` | ❌ | — | Token contract to drip from. Typically same as `TOKEN_CONTRACT_ID`. |
-| `FAUCET_ADMIN_SECRET_KEY` | ❌ | — | Secret key that holds faucet tokens. Must be different from the governance admin key. |
+| `FAUCET_SECRET_KEY_FILE` | ✅ (recommended) | — | Path to a file containing the faucet signing secret key (`S...`). The file should be mounted read-only (e.g. a Docker/Kubernetes secret). Preferred over the env-var form. |
+| `FAUCET_SECRET_KEY_AWS_SECRET_ID` | ❌ | — | AWS Secrets Manager secret ID (name or ARN) containing the faucet signing secret key. Used when `FAUCET_SECRET_KEY_FILE` is not set. Requires AWS credentials/region to be available to the process. |
+| `FAUCET_SECRET_KEY` | ⚠️ deprecated | — | Faucet signing secret key as a plain env var. **Deprecated** — for local development only; emits a deprecation warning at startup. Use `FAUCET_SECRET_KEY_FILE` or `FAUCET_SECRET_KEY_AWS_SECRET_ID` instead. Must be different from the governance admin key. |
 | `FAUCET_RPC_URL` | ❌ | `https://soroban-testnet.stellar.org` | RPC endpoint for faucet transactions. |
 | `FAUCET_AMOUNT` | ❌ | `1000000000` | Amount of tokens to drip per request, in base units. `1000000000` = 100 VOTE at 7 decimals. |
 | `FAUCET_TOKEN_DECIMALS` | ❌ | `7` | Token decimal places (used for display only). |
@@ -323,7 +325,7 @@ Sensitive values that must never be committed to version control:
 |----------|---------|-------|
 | `STELLAR_SECRET_KEY` | Root scripts | Governance admin key — highest privilege |
 | `KEEPER_SECRET_KEY` | Keeper service | Must be funded with XLM |
-| `FAUCET_ADMIN_SECRET_KEY` | Backend (faucet) | Testnet/staging only |
+| Faucet signing key | Backend (faucet) | Testnet/staging only. Load via `FAUCET_SECRET_KEY_FILE` (mounted secret file) or `FAUCET_SECRET_KEY_AWS_SECRET_ID` (AWS Secrets Manager). The `FAUCET_SECRET_KEY` env var is **deprecated** and intended for local development only. |
 | `SMTP_PASS` | Notification service, Keeper | Email auth password |
 | `ADMIN_API_KEY` | Notification service | API auth secret |
 | `VIEWER_API_KEY` | Notification service | API auth secret |

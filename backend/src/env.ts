@@ -67,6 +67,49 @@ const envSchema = z.object({
     .string()
     .min(1, 'AUDIT_LOG_PATH must not be empty')
     .default('./data/audit.log'),
+
+  // ── Faucet ────────────────────────────────────────────────────────────────
+  FAUCET_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false'),
+
+  // Path to a file containing the faucet signing keypair secret.
+  FAUCET_SECRET_KEY_FILE: z.string().min(1).optional(),
+
+  // AWS Secrets Manager secret id/ARN holding the faucet signing keypair.
+  FAUCET_SECRET_KEY_AWS_SECRET_ID: z.string().min(1).optional(),
+
+  // Deprecated: raw secret in env var, supported for local dev only.
+  FAUCET_SECRET_KEY: z.string().optional(),
+}).superRefine((env, ctx) => {
+  if (env.FAUCET_ENABLED !== 'true') return;
+
+  const sources = [
+    env.FAUCET_SECRET_KEY_FILE,
+    env.FAUCET_SECRET_KEY_AWS_SECRET_ID,
+    env.FAUCET_SECRET_KEY,
+  ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+  if (sources.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FAUCET_SECRET_KEY_FILE'],
+      message:
+        'FAUCET_ENABLED is true but no faucet secret source is configured. ' +
+        'Set exactly one of FAUCET_SECRET_KEY_FILE, FAUCET_SECRET_KEY_AWS_SECRET_ID, ' +
+        'or FAUCET_SECRET_KEY (deprecated, local dev only).',
+    });
+  } else if (sources.length > 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FAUCET_SECRET_KEY_FILE'],
+      message:
+        'Multiple faucet secret sources are configured. ' +
+        'Set exactly one of FAUCET_SECRET_KEY_FILE, FAUCET_SECRET_KEY_AWS_SECRET_ID, ' +
+        'or FAUCET_SECRET_KEY (deprecated, local dev only).',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
