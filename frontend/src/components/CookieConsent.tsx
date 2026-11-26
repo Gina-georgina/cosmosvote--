@@ -7,14 +7,15 @@
 
 import { useState, useEffect } from 'react';
 
-const STORAGE_KEY = 'analytics_consent';
+/** Shared localStorage key used by both this component and analytics.ts. */
+export const CONSENT_STORAGE_KEY = 'analytics_consent';
 
 export type ConsentState = 'accepted' | 'rejected' | null;
 
 /** Read the stored consent value without side effects. */
 export function getStoredConsent(): ConsentState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(CONSENT_STORAGE_KEY);
     if (raw === 'accepted' || raw === 'rejected') return raw;
   } catch {
     // localStorage unavailable
@@ -25,10 +26,24 @@ export function getStoredConsent(): ConsentState {
 /** Persist a consent decision. */
 export function setStoredConsent(value: 'accepted' | 'rejected'): void {
   try {
-    localStorage.setItem(STORAGE_KEY, value);
+    localStorage.setItem(CONSENT_STORAGE_KEY, value);
   } catch {
     // storage unavailable — operate in-memory only
   }
+}
+
+/** Clear the stored consent decision so the banner reappears. */
+export function clearStoredConsent(): void {
+  try {
+    localStorage.removeItem(CONSENT_STORAGE_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
+
+/** Returns true only when the user has explicitly accepted analytics. */
+export function hasAnalyticsConsent(): boolean {
+  return getStoredConsent() === 'accepted';
 }
 
 interface CookieConsentProps {
@@ -48,6 +63,16 @@ export function CookieConsent({ onDecision }: CookieConsentProps) {
     if (getStoredConsent() === null) {
       setVisible(true);
     }
+
+    // Re-evaluate when consent is cleared (e.g. from another tab or settings)
+    function handleStorage(event: StorageEvent) {
+      if (event.key === CONSENT_STORAGE_KEY || event.key === null) {
+        setVisible(getStoredConsent() === null);
+      }
+    }
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   if (!visible) return null;

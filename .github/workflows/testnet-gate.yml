@@ -11,10 +11,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Integration test gate ─────────────────────────────────────────────
+  # Deployment to testnet is blocked until the full integration test suite
+  # passes. The `testnet-smoke` job declares `needs: integration-tests`, so
+  # a failure here prevents any contract from being deployed.
+  integration-tests:
+    name: Integration Tests (make test-integration)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Run integration tests
+        run: make test-integration
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL not configured — skipping Slack notification"
+            exit 0
+          fi
+
+          curl -sf -X POST "${SLACK_WEBHOOK_URL}" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"text\": \"🚨 *CosmosVote testnet gate blocked* — integration tests failed on commit \`${{ github.sha }}\` by ${{ github.actor }}. Deployment was NOT performed.\nSee: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+            }"
+
   testnet-smoke:
     name: Testnet Deploy & Smoke Test
     runs-on: ubuntu-latest
     environment: testnet
+    # Gate: deployment only runs after integration tests pass.
+    needs: integration-tests
 
     # Expose contract IDs as outputs so the summary step can read them
     outputs:
@@ -37,6 +75,12 @@ jobs:
 
       - name: Build WASM binaries
         run: cargo build --release --target wasm32-unknown-unknown
+
+      # ── Pre-flight: environment variable validation ──────────────────
+      # Fails if any variable in .env.example is undocumented, catching
+      # env var drift before we attempt a deploy.
+      - name: Validate .env.example
+        run: bash scripts/check_env_example.sh
 
       - name: Deploy contracts to testnet
         id: deploy

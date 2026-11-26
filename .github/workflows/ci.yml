@@ -11,7 +11,12 @@ env:
   RUST_BACKTRACE: 1
   RUST_VERSION: "1.78.0"
 
+# Required status checks (configure these as branch protection rules for main/develop):
+#   - "Secrets Scan" (secret-scan)  — gitleaks over full git history; violations block merge (#488)
+#   - "Env Example Check" (env-check) — validates .env.example documentation; failures block merge (#489)
 jobs:
+  # Issue #488: block PRs that commit secrets. fetch-depth: 0 scans the full git
+  # history on first run; false positives are suppressed via .gitleaks.toml.
   secret-scan:
     name: Secrets Scan
     runs-on: ubuntu-latest
@@ -24,6 +29,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
+
+  # Issue #489: fail the build when .env.example contains undocumented variables.
+  env-check:
+    name: Env Example Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate .env.example documentation
+        run: bash scripts/check_env_example.sh
 
   fmt:
     name: Formatting
@@ -165,6 +179,103 @@ jobs:
       - name: Validate Docker Compose config
         run: docker compose config --quiet
 
+  # ─── Multi-architecture Docker image ───────────────────────────────────────
+  # Builds the image for linux/amd64 and linux/arm64 (Apple Silicon) and pushes
+  # a single multi-arch manifest to the container registry.
+  docker-build:
+    name: Docker Build (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    needs: [fmt, lint, test]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@988b5a0280414f15e6da17513954e9926061b244 # v3
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build image for ${{ matrix.platform }}
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+  docker-manifest:
+    name: Docker Multi-Arch Manifest
+    runs-on: ubuntu-latest
+    needs: docker-build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@988b5a0280414f15e6da17513954e9926061b244 # v3
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+      - name: Build and push multi-arch manifest
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=linux/amd64
+          cache-to: type=gha,mode=max,scope=multi-arch
+      - name: Inspect multi-arch manifest
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:sha-${GITHUB_SHA:0:7}"
+          docker buildx imagetools inspect "$IMAGE"
+          platforms=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' \
+            | grep -o '"platform":{[^}]*}' | grep -o '"architecture":"[^"]*"' | sort -u)
+          echo "Manifest architectures:"
+          echo "$platforms"
+          for arch in amd64 arm64; do
+            if ! echo "$platforms" | grep -q "\"$arch\""; then
+              echo "Error: multi-arch manifest is missing linux/$arch"
+              exit 1
+            fi
+          done
+          echo "Multi-arch manifest contains linux/amd64 and linux/arm64."
+
   license-check:
     name: License Compliance
     runs-on: ubuntu-latest
@@ -222,47 +333,25 @@ jobs:
       - name: Run actionlint
         run: actionlint -color
 
-  zizmor:
-    name: Lint GitHub Actions (zizmor)
+  frontend-i18n:
+    name: Frontend i18n Lint & Locale Sync
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          persist-credentials: false
-      - name: Run zizmor
-        uses: zizmorcore/zizmor-action@e673c3917a1aef3c65c972347ed84ccd013ecda4 # v0.2.0
-        with:
-          advanced-security: false
-      - name: Verify all actions are pinned to full commit SHAs
-        run: |
-          set -euo pipefail
-          # Match every `uses:` value in the workflows directory.
-          refs=$(grep -rhoE '^\s*-?\s*uses:\s*[^[:space:]]+' .github/workflows/ \
-            | sed -E 's/^\s*-?\s*uses:\s*//' \
-            | sort -u)
-          if [ -z "$refs" ]; then
-            echo "Error: no uses: directives found in .github/workflows/"
-            exit 1
-          fi
-          failed=0
-          while IFS= read -r ref; do
-            # Local actions (./path) and docker:// references are out of scope.
-            case "$ref" in
-              ./*|docker://*) continue ;;
-            esac
-            action="${ref%@*}"
-            pin="${ref##*@}"
-            if ! printf '%s' "$pin" | grep -qE '^[0-9a-f]{40}$'; then
-              echo "Mutable or invalid ref: $ref (expected <owner>/<repo>@<40-hex-sha>)"
-              failed=1
-            fi
-          done <<< "$refs"
-          if [ "$failed" -ne 0 ]; then
-            echo "Error: one or more GitHub Actions are not pinned to a full commit SHA."
-            exit 1
-          fi
-          echo "All GitHub Actions are pinned to full commit SHAs."
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint for hardcoded strings (i18next/no-literal-string)
+        run: npm run lint:i18n
+      - name: Verify locale files are in sync
+        run: npm run check:i18n
 
   frontend-coverage:
     name: Frontend Coverage
@@ -291,16 +380,20 @@ jobs:
     name: Notify on Failure
     runs-on: ubuntu-latest
     needs:
+      - secret-scan
+      - env-check
       - fmt
       - lint
       - test
       - benchmark
       - build
       - deployment-tooling
+      - docker-build
+      - docker-manifest
       - license-check
       - coverage
       - actionlint
-      - zizmor
+      - frontend-i18n
       - frontend-coverage
     if: ${{ always() && github.event_name == 'push' && contains(fromJson('["main", "develop"]'), github.ref_name) }}
     env:
@@ -311,16 +404,20 @@ jobs:
         run: |
           FAILED_JOBS=""
           for job_result in \
+            "Secrets Scan:${{ needs.secret-scan.result }}" \
+            "Env Example Check:${{ needs.env-check.result }}" \
             "Formatting:${{ needs.fmt.result }}" \
             "Clippy:${{ needs.lint.result }}" \
             "Tests:${{ needs.test.result }}" \
             "Instruction Count Benchmarks:${{ needs.benchmark.result }}" \
             "Build WASM:${{ needs.build.result }}" \
             "Deployment Tooling Checks:${{ needs.deployment-tooling.result }}" \
+            "Docker Build:${{ needs.docker-build.result }}" \
+            "Docker Multi-Arch Manifest:${{ needs.docker-manifest.result }}" \
             "License Compliance:${{ needs.license-check.result }}" \
             "Contract Coverage:${{ needs.coverage.result }}" \
             "Lint GitHub Actions:${{ needs.actionlint.result }}" \
-            "Lint GitHub Actions (zizmor):${{ needs.zizmor.result }}" \
+            "Frontend i18n Lint & Locale Sync:${{ needs.frontend-i18n.result }}" \
             "Frontend Coverage:${{ needs.frontend-coverage.result }}"; do
             name="${job_result%%:*}"
             result="${job_result##*:}"

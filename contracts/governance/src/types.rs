@@ -36,6 +36,10 @@ pub enum ContractError {
     NoVotingPower       = 26,
     AdminVoteRestricted = 27,
     VoteNotFound        = 28,
+    /// Returned when a voter attempts to cast a vote identical to the vote
+    /// already recorded for them on the proposal. Vote changes are not
+    /// supported: once a vote is cast it cannot be modified, so re-submitting
+    /// the same choice (or any other choice) is rejected.
     VoteAlreadySame     = 29,
 
     // Admin
@@ -59,6 +63,7 @@ pub enum ContractError {
     // Execution
     ExecutionFailed     = 60,
     InvalidTreasuryAmount = 61,
+    InvalidRecipient    = 62,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +110,7 @@ pub enum ProposalState {
     Rejected,
     Executed,
     Cancelled,
+    ExecutionFailed,
 }
 
 #[contracttype]

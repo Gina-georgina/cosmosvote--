@@ -18,6 +18,10 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 RUN mkdir -p /data && chown node:node /data
+# Faucet signing keypair is loaded from a mounted secret file, never baked into the image.
+# Operators should mount the faucet key at /run/secrets/faucet_secret_key (read-only)
+# and set FAUCET_SECRET_KEY_FILE=/run/secrets/faucet_secret_key.
+RUN mkdir -p /run/secrets && chown node:node /run/secrets
 USER node
 
 EXPOSE 3001

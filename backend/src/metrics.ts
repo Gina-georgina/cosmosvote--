@@ -14,6 +14,7 @@
 
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { IncomingMessage, ServerResponse } from 'http';
+import { sendProblem, PROBLEM_TYPES } from './problemJson';
 
 // ── Registry ────────────────────────────────────────────────────────────────
 
@@ -76,17 +77,27 @@ export async function metricsHandler(
   res: ServerResponse
 ): Promise<void> {
   if (req.method !== 'GET') {
-    res.writeHead(405, { Allow: 'GET' });
-    res.end('Method Not Allowed');
+    res.setHeader('Allow', 'GET');
+    sendProblem(res, req, {
+      type: PROBLEM_TYPES.methodNotAllowed,
+      title: 'Method Not Allowed',
+      status: 405,
+      detail: 'Only GET is supported on /metrics.',
+    });
     return;
   }
 
   try {
     const content = await registry.metrics();
-    res.writeHead(200, { 'Content-Type': registry.contentType });
+    // Use a compressible text content type so the compression middleware
+    // (gzip/brotli) can shrink large metrics payloads. The Prometheus text
+    // exposition format is plain text; append charset for correctness.
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+    });
     res.end(content);
   } catch (err) {
-    res.writeHead(500);
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Internal Server Error');
   }
 }

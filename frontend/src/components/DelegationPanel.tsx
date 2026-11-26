@@ -204,3 +204,5 @@ function btnStyle(bg: string): React.CSSProperties {
     cursor: 'pointer',
   };
 }
+
+export default DelegationPanel;

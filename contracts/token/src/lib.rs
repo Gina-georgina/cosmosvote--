@@ -11,6 +11,7 @@ mod types;
 
 #[cfg(test)]
 mod test;
+mod prop_tests;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -168,6 +169,16 @@ impl TokenContract {
 
         let allowance_record = TokenStorage::allowance_record(&env, &from, &spender)
             .ok_or(ContractError::AllowanceExceeded)?;
+
+        // Treat an expired allowance as zero: if the current ledger sequence has
+        // passed the recorded expiry, the spender has no remaining allowance.
+        let current_ledger = env.ledger().sequence();
+        if current_ledger > allowance_record.expiry_ledger {
+            // Clear the stale entry so it does not accumulate indefinitely.
+            TokenStorage::set_allowance(&env, &from, &spender, 0, allowance_record.expiry_ledger);
+            return Err(ContractError::AllowanceExceeded);
+        }
+
         if allowance_record.amount < amount {
             return Err(ContractError::AllowanceExceeded);
         }
@@ -198,22 +209,28 @@ impl TokenContract {
     // -----------------------------------------------------------------------
 
     /// Approve `spender` to transfer up to `amount` tokens from `owner`.
+    ///
+    /// `expiry_ledger` is the ledger sequence after which the allowance is
+    /// treated as zero. When `None`, the allowance never expires (stored as
+    /// `u32::MAX`). An explicit expiry must be strictly greater than the
+    /// current ledger sequence.
     pub fn approve(
         env: Env,
         owner: Address,
         spender: Address,
         amount: i128,
-        expiry_ledger: u32,
+        expiry_ledger: Option<u32>,
     ) -> Result<(), ContractError> {
         owner.require_auth();
         if amount < 0 {
             return Err(ContractError::InvalidAmount);
         }
         let current_ledger = env.ledger().sequence();
-        if expiry_ledger <= current_ledger {
+        let resolved_expiry = expiry_ledger.unwrap_or(u32::MAX);
+        if resolved_expiry <= current_ledger {
             return Err(ContractError::InvalidExpiry);
         }
-        TokenStorage::set_allowance(&env, &owner, &spender, amount, expiry_ledger);
+        TokenStorage::set_allowance(&env, &owner, &spender, amount, resolved_expiry);
         TokenEvents::approval(&env, &owner, &spender, amount);
         Ok(())
     }
@@ -287,6 +304,47 @@ impl TokenContract {
         TokenStorage::set_balance(&env, &owner, bal - amount);
 
         TokenEvents::burned(&env, &owner, &owner, amount);
+        Ok(())
+    }
+
+    /// Burn tokens from `from` on behalf of an approved `spender`, consuming
+    /// the spender's allowance. Mirrors the `transfer_from` authorization
+    /// model so protocols can burn tokens they were approved to move.
+    pub fn burn_from(
+        env: Env,
+        spender: Address,
+        from: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        spender.require_auth();
+        Self::assert_not_paused(&env)?;
+        Self::validate_amount(amount)?;
+
+        let allowance_record = TokenStorage::allowance_record(&env, &from, &spender)
+            .ok_or(ContractError::AllowanceExceeded)?;
+        if allowance_record.amount < amount {
+            return Err(ContractError::AllowanceExceeded);
+        }
+
+        let from_bal = TokenStorage::balance(&env, &from);
+        if from_bal < amount {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        let remaining = allowance_record.amount - amount;
+        TokenStorage::set_allowance(
+            &env,
+            &from,
+            &spender,
+            remaining,
+            allowance_record.expiry_ledger,
+        );
+
+        let supply = TokenStorage::total_supply(&env);
+        TokenStorage::set_total_supply(&env, supply - amount);
+        TokenStorage::set_balance(&env, &from, from_bal - amount);
+
+        TokenEvents::burned(&env, &spender, &from, amount);
         Ok(())
     }
 

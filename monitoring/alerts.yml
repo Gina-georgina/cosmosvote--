@@ -11,6 +11,7 @@ groups:
         for: 5m
         labels:
           severity: warning
+          receiver: team-webhook
         annotations:
           summary: "RPC p95 latency above 2 s on {{ $labels.network }}"
           description: "Current value: {{ $value | humanizeDuration }}"
@@ -23,6 +24,7 @@ groups:
         for: 5m
         labels:
           severity: critical
+          receiver: team-webhook
         annotations:
           summary: "RPC error rate above 5% on {{ $labels.network }}"
           description: "Current rate: {{ $value | humanizePercentage }}"
@@ -33,6 +35,7 @@ groups:
         for: 2m
         labels:
           severity: warning
+          receiver: team-webhook
         annotations:
           summary: "Event polling is lagging on {{ $labels.network }}"
           description: "Lag: {{ $value | humanizeDuration }}"
@@ -43,5 +46,33 @@ groups:
         for: 1m
         labels:
           severity: critical
+          receiver: team-webhook
         annotations:
           summary: "CosmosVote RPC target is down on {{ $labels.network }}"
+
+      # No proposals finalised in 24h while active proposals exist
+      - alert: NoProposalsFinalised
+        expr: |
+          (count(cosmosvote_proposals{status="active"}) > 0)
+            and on()
+          (increase(cosmosvote_proposals_finalised_total[24h]) == 0)
+        for: 1h
+        labels:
+          severity: warning
+          receiver: team-email
+        annotations:
+          summary: "No proposals finalised in the last 24 h on {{ $labels.network }}"
+          description: "Active proposals exist but none have been finalised in 24 h."
+
+      # Faucet error rate > 10% for 5 minutes
+      - alert: HighFaucetErrorRate
+        expr: |
+          rate(cosmosvote_faucet_errors_total[5m])
+            / rate(cosmosvote_faucet_requests_total[5m]) > 0.10
+        for: 5m
+        labels:
+          severity: critical
+          receiver: team-webhook
+        annotations:
+          summary: "Faucet error rate above 10% on {{ $labels.network }}"
+          description: "Current rate: {{ $value | humanizePercentage }}"

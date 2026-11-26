@@ -411,6 +411,30 @@ pub fn execute(env: Env, admin: Address, proposal_id: u64) -> Result<(), Contrac
 pub fn cancel(env: Env, admin: Address, proposal_id: u64, reason: Option<String>) -> Result<(), ContractError>
 ```
 
+### Query Functions
+
+```rust
+// Returns the current ProposalCount (monotonic proposal ID counter) from instance storage.
+// Use this to enumerate proposal IDs (IDs are 1..=proposal_count) without reading raw storage keys.
+pub fn proposal_count(env: Env) -> u64
+
+// Returns all current governance parameters in a single call.
+pub fn get_config(env: Env) -> GovernanceConfig
+```
+
+`GovernanceConfig` exposes the current governance parameters:
+
+```rust
+pub struct GovernanceConfig {
+    pub min_proposal_balance: i128, // Minimum token balance required to create a proposal
+    pub proposal_cooldown: u64,     // Seconds between proposals per proposer
+    pub restrict_admin_vote: bool,  // Admin vote restriction flag
+    pub min_quorum_bps: u32,        // Minimum quorum in basis points
+}
+```
+
+Both functions are read-only and require no authorization, making them safe to call from off-chain tooling and indexers.
+
 ### Admin Operations
 
 ```rust
@@ -642,6 +666,18 @@ The Dockerfile uses a **multi-stage build** to keep the final image small and fr
 | `runtime` | `debian:bookworm-slim` (pinned to digest) | Ships only `*.wasm` artifacts + Stellar CLI |
 
 Both base images are pinned to a specific digest for reproducible builds.
+
+**Platform support:** Published Docker images are multi-architecture and support both `linux/amd64` and `linux/arm64`, so Apple Silicon (M-series) machines run the image natively without emulation. The CI pipeline builds and tests both architectures and pushes a multi-arch manifest to the container registry.
+
+**Build a multi-arch image locally** (requires Docker Buildx; use `--push` or `--load` to store the result):
+
+```bash
+# Build for both architectures and push a multi-arch manifest
+docker buildx build --platform linux/amd64,linux/arm64 --target runtime -t cosmosvote:latest --push .
+
+# Build for a single architecture and load it into the local Docker daemon
+docker buildx build --platform linux/arm64 --target runtime -t cosmosvote:latest --load .
+```
 
 **Build the runtime image** (WASM artifacts only):
 

@@ -10,20 +10,52 @@
     }
   ],
   "__requires": [
-    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
-    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
-    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
-    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
-    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" }
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    }
   ],
   "title": "CosmosVote Service Metrics",
   "uid": "cosmosvote-overview",
-  "tags": ["cosmosvote", "governance", "stellar"],
+  "tags": [
+    "cosmosvote",
+    "governance",
+    "stellar"
+  ],
   "timezone": "browser",
   "schemaVersion": 38,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -31,10 +63,19 @@
         "type": "custom",
         "label": "Network",
         "options": [
-          { "text": "testnet", "value": "testnet" },
-          { "text": "mainnet", "value": "mainnet" }
+          {
+            "text": "testnet",
+            "value": "testnet"
+          },
+          {
+            "text": "mainnet",
+            "value": "mainnet"
+          }
         ],
-        "current": { "text": "testnet", "value": "testnet" }
+        "current": {
+          "text": "testnet",
+          "value": "testnet"
+        }
       }
     ]
   },
@@ -43,14 +84,36 @@
       "id": 1,
       "title": "RPC Latency (p50 / p95 / p99)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "ms", "thresholds": { "steps": [
-          { "color": "green", "value": null },
-          { "color": "yellow", "value": 500 },
-          { "color": "red", "value": 2000 }
-        ]}}
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 2000
+              }
+            ]
+          }
+        }
       },
       "targets": [
         {
@@ -71,9 +134,21 @@
       "id": 2,
       "title": "Event Polling Rate (events/min)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
       "targets": [
         {
           "expr": "rate(cosmosvote_events_polled_total{network=\"$network\"}[1m]) * 60",
@@ -92,6 +167,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "description": "Alert: RPC error rate > 5% for 5m (monitoring/alerts.yml: CosmosVoteRpcErrorRateHigh). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "rate(cosmosvote_rpc_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_rpc_requests_total{network=\"$network\"}[5m])",
@@ -110,6 +186,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" } } },
+      "description": "Alert: no proposals finalised in 24h while proposals are active (monitoring/alerts.yml: CosmosVoteProposalFinalisationStalled). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "cosmosvote_proposals_active{network=\"$network\"}",
@@ -121,9 +198,21 @@
       "id": 5,
       "title": "Total Votes Cast",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
       "targets": [
         {
           "expr": "cosmosvote_votes_cast_total{network=\"$network\"}",
@@ -135,17 +224,37 @@
       "id": 6,
       "title": "RPC Uptime",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "min": 0, "max": 1,
-          "thresholds": { "steps": [
-            { "color": "red", "value": null },
-            { "color": "yellow", "value": 0.95 },
-            { "color": "green", "value": 0.99 }
-          ]}
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
         }
       },
       "targets": [
@@ -159,16 +268,35 @@
       "id": 7,
       "title": "Event Polling Lag (seconds behind)",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "thresholds": { "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 60 },
-            { "color": "red", "value": 300 }
-          ]}
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
         }
       },
       "targets": [
@@ -182,14 +310,35 @@
       "id": 8,
       "title": "Notifications Sent / Failed (rate/min)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "failed/min" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "failed/min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
         ]
       },
@@ -208,9 +357,21 @@
       "id": 9,
       "title": "Webhook Latency p50 / p95 / p99 (seconds)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, rate(webhook_latency_seconds_bucket{service=\"cosmosvote-notification\"}[5m]))",
@@ -230,17 +391,38 @@
       "id": 10,
       "title": "Active Subscriptions",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "color": { "mode": "thresholds" },
-          "thresholds": { "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 10 },
-            { "color": "red", "value": 50 }
-          ]}
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
         }
       },
       "targets": [
@@ -254,23 +436,67 @@
       "id": 11,
       "title": "Notification Failure Rate",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 24 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "min": 0, "max": 1,
-          "thresholds": { "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 0.01 },
-            { "color": "red", "value": 0.05 }
-          ]}
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
         }
       },
       "targets": [
         {
           "expr": "rate(notification_failed_total{service=\"cosmosvote-notification\"}[5m]) / (rate(notification_sent_total{service=\"cosmosvote-notification\"}[5m]) + rate(notification_failed_total{service=\"cosmosvote-notification\"}[5m]))",
           "legendFormat": "failure rate"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Faucet Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.05 },
+            { "color": "red", "value": 0.10 }
+          ]}
+        }
+      },
+      "description": "Alert: faucet error rate > 10% for 5m (monitoring/alerts.yml: CosmosVoteFaucetErrorRateHigh). Routed to team webhook/email.",
+      "targets": [
+        {
+          "expr": "rate(cosmosvote_faucet_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_faucet_claims_total{network=\"$network\"}[5m])",
+          "legendFormat": "faucet error rate"
         }
       ]
     }

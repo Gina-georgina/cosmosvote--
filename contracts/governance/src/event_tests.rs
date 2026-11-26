@@ -247,6 +247,10 @@ fn test_proposal_cancelled_event_no_reason() {
     // reason field should be empty string when None is passed
     let expected_reason = soroban_sdk::String::from_str(&env, "");
     assert_eq!(ev.2, (id, admin.clone(), 0u32, expected_reason).into_val(&env));
+
+    // verify the reason is not stored on the proposal when None is passed
+    let proposal = t.governance.get_proposal(&id);
+    assert_eq!(proposal.cancellation_reason, None);
 }
 
 #[test]
@@ -356,5 +360,41 @@ fn test_admin_transfer_accepted_event_includes_timestamp() {
 
     // Verify payload: (previous_admin, new_admin, timestamp)
     let expected = (admin.clone(), new_admin.clone(), accept_ts).into_val(&env);
+    assert_eq!(ev.2, expected);
+}
+
+// ---------------------------------------------------------------------------
+// proposal_cooldown_updated  (issue #460)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_proposal_cooldown_updated_event() {
+    let env = Env::default();
+    let t = setup(&env);
+    let gov_id = t.governance.address.clone();
+    let admin = t.admin.clone();
+
+    let old_cooldown = t.governance.get_proposal_cooldown();
+    let new_cooldown: u64 = old_cooldown + 3_600;
+
+    t.governance.update_proposal_cooldown(&admin, &new_cooldown);
+
+    let all = env.events().all();
+    let ev = all
+        .iter()
+        .rev()
+        .find(|(cid, topics, _)| {
+            *cid == gov_id
+                && *topics
+                    == vec![
+                        &env,
+                        symbol_short!("gov").into_val(&env),
+                        symbol_short!("cooldown").into_val(&env),
+                    ]
+        })
+        .expect("proposal_cooldown_updated event not emitted");
+
+    // Verify payload: (admin, old_value, new_value)
+    let expected = (admin.clone(), old_cooldown, new_cooldown).into_val(&env);
     assert_eq!(ev.2, expected);
 }
