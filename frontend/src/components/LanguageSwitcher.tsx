@@ -2,6 +2,7 @@
  * LanguageSwitcher – locale selector for the CosmosVote header.
  *
  * Issue #275 – Add language localization framework and default i18n support
+ * Issue #385 – Internationalise all hardcoded English strings
  *
  * Renders a <select> populated from SUPPORTED_LOCALES.
  * Changing the selection calls setLocale() from useI18n().
@@ -14,13 +15,13 @@ interface Props {
 }
 
 export function LanguageSwitcher({ className }: Props) {
-  const { locale, setLocale } = useI18n();
+  const { locale, setLocale, t } = useI18n();
 
   return (
     <select
       value={locale}
       onChange={(e) => setLocale(e.target.value as typeof locale)}
-      aria-label="Select language"
+      aria-label={t('languageSwitcher.selectLanguage')}
       className={className}
       style={{
         background: 'none',

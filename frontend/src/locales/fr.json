@@ -52,5 +52,62 @@
   "address_show": "Cliquez pour afficher l'adresse complète",
   "address_hide": "Cliquez pour masquer l'adresse complète",
   "new_proposal": "Nouvelle proposition",
-  "cancel": "Annuler"
+  "cancel": "Annuler",
+
+  "proposal_title": "Titre de la proposition",
+  "proposal_description": "Description",
+  "proposal_description_placeholder": "Décrivez votre proposition...",
+  "proposal_submit": "Soumettre la proposition",
+  "proposal_submitting": "Envoi en cours...",
+  "proposal_submit_error": "Échec de la soumission de la proposition",
+  "proposal_submit_success": "Proposition soumise avec succès",
+
+  "vote_confirm_heading": "Confirmer votre vote",
+  "vote_confirm_message": "Voulez-vous voter sur cette proposition ?",
+  "vote_confirm_yes": "Confirmer",
+  "vote_confirm_cancel": "Annuler",
+  "vote_submitting": "Envoi du vote...",
+  "vote_error": "Échec de l'envoi du vote",
+  "vote_success": "Vote enregistré avec succès",
+
+  "wallet_connected": "Portefeuille connecté",
+  "wallet_connecting": "Connexion...",
+  "wallet_connection_error": "Échec de la connexion du portefeuille",
+  "wallet_invalid_address": "Adresse Stellar invalide",
+  "wallet_copy_address": "Copier l'adresse",
+  "wallet_address_copied": "Adresse copiée dans le presse-papiers",
+
+  "dashboard_heading": "Tableau de bord",
+  "dashboard_total_proposals": "Propositions totales",
+  "dashboard_active_proposals": "Propositions actives",
+  "dashboard_total_votes": "Votes totaux",
+  "dashboard_participation": "Taux de participation",
+  "dashboard_loading": "Chargement des données du tableau de bord...",
+  "dashboard_error": "Échec du chargement des données du tableau de bord",
+
+  "docs_heading": "Documentation",
+  "docs_loading": "Chargement de la documentation...",
+  "docs_error": "Échec du chargement de la documentation",
+
+  "state_active": "Active",
+  "state_passed": "Approuvée",
+  "state_rejected": "Rejetée",
+  "state_executed": "Exécutée",
+  "state_pending": "En attente",
+
+  "time_remaining": "Temps restant",
+  "time_ended": "Terminée",
+  "time_days": "jours",
+  "time_hours": "heures",
+  "time_minutes": "minutes",
+
+  "error_generic": "Une erreur est survenue",
+  "error_network": "Erreur réseau, veuillez réessayer",
+  "error_not_found": "Introuvable",
+  "retry": "Réessayer",
+  "close": "Fermer",
+  "confirm": "Confirmer",
+  "back": "Retour",
+  "next": "Suivant",
+  "previous": "Précédent"
 }

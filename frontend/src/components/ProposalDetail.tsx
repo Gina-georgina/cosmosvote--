@@ -23,6 +23,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { formatTokenAmount, maskAddress, sanitizeWalletMessage } from '../utils';
 import { explorerAccountUrl } from '../config';
 import { usePolling } from '../hooks/usePolling';
+import { useI18n } from '../i18n/I18nContext';
 
 /** Polling interval in ms — configurable via VITE_TALLY_POLL_INTERVAL, default 15 s. */
 const TALLY_POLL_INTERVAL = Number(import.meta.env.VITE_TALLY_POLL_INTERVAL ?? 15_000);
@@ -79,20 +80,21 @@ type VoteChoice = 'Yes' | 'No' | 'Abstain';
 
 const VOTE_CONFIG: Array<{
   vote: VoteChoice;
-  label: string;
+  labelKey: string;
   shortcut: string;
   emoji: string;
   color: string;
   shortcutKey: string;
 }> = [
-  { vote: 'Yes',     label: 'Vote Yes',    shortcut: 'Y', emoji: '✅', color: '#16a34a', shortcutKey: 'y' },
-  { vote: 'No',      label: 'Vote No',     shortcut: 'N', emoji: '❌', color: '#dc2626', shortcutKey: 'n' },
-  { vote: 'Abstain', label: 'Abstain',     shortcut: 'A', emoji: '⬜', color: '#6b7280', shortcutKey: 'a' },
+  { vote: 'Yes',     labelKey: 'proposalDetail.voteYes', shortcut: 'Y', emoji: '✅', color: '#16a34a', shortcutKey: 'y' },
+  { vote: 'No',      labelKey: 'proposalDetail.voteNo',  shortcut: 'N', emoji: '❌', color: '#dc2626', shortcutKey: 'n' },
+  { vote: 'Abstain', labelKey: 'proposalDetail.abstain', shortcut: 'A', emoji: '⬜', color: '#6b7280', shortcutKey: 'a' },
 ];
 
 export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddress, onClose, triggerRef }: Props) {
   // Get signTransaction from the wallet store so votes can be signed by the real wallet.
   const { signTransaction } = useWallet();
+  const { t } = useI18n();
 
   const [hasVoted, setHasVoted] = useState<boolean | null>(null);
   const [voteRecord, setVoteRecord] = useState<{ vote: string; weight: bigint } | null>(null);
@@ -103,6 +105,10 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
   const [copiedProposer, setCopiedProposer] = useState(false);
   // For multi-choice proposals: the index the user has selected (null = none selected yet)
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState<number | null>(null);
+  // Voting power panel state — issue #20
+  const [ownBalance, setOwnBalance] = useState<bigint | null>(null);
+  const [delegatedWeight, setDelegatedWeight] = useState<bigint | null>(null);
+  const [votingPowerLoading, setVotingPowerLoading] = useState(false);
 
   // Live tally — starts from the prop and updates via polling
   const [tally, setTally] = useState<{ yes: bigint; no: bigint; abstain: bigint }>({
@@ -252,6 +258,12 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
   const shortAddress = maskAddress(p.proposer);
   const hasChoices = Array.isArray(p.choices) && p.choices.length > 0;
 
+  // Winning choice for finalised multi-choice proposals (index into p.choices)
+  const winningChoiceIndex: number | null =
+    !isProposalActive && hasChoices && typeof p.winning_choice === 'number'
+      ? p.winning_choice
+      : null;
+
   // Wallet-facing message fields are sanitized to ASCII-safe characters so that
   // frontend-supplied proposal content cannot inject misleading content into
   // wallet prompts or vote memos (see docs/wallet-message-sanitization.md).
@@ -272,16 +284,20 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
       setHasVoted(true);
       const voteLabel =
         typeof voteInput === 'object' && 'choice' in voteInput
-          ? (safeChoices[voteInput.choice] ?? `Choice ${voteInput.choice}`)
-          : voteInput;
+          ? (safeChoices[voteInput.choice] ?? t('proposalDetail.choiceFallback', { index: voteInput.choice }))
+          : t(VOTE_CONFIG.find(v => v.vote === voteInput)?.labelKey ?? 'proposalDetail.voteYes');
       setVoteRecord({ vote: voteLabel, weight: BigInt(0) });
       setVoteConfirmation(
         sanitizeWalletMessage(
-          `Your vote "${voteLabel}" on proposal #${String(p.id)} has been submitted.`,
+          t('proposalDetail.voteSubmitted', { vote: voteLabel, id: String(p.id) }),
         ),
       );
     } catch (e) {
-      setVoteError(`Vote failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      setVoteError(
+        t('proposalDetail.voteFailed', {
+          error: e instanceof Error ? e.message : t('proposalDetail.unknownError'),
+        }),
+      );
     } finally {
       setIsVoting(false);
     }
@@ -308,11 +324,13 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
         <style>{`@keyframes pulse{0%,100%{background-position:100% 50%}50%{background-position:0% 50%}}`}</style>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-          <h2 id="proposal-dialog-title" style={{ margin: 0 }}>Proposal #{String(p.id)}</h2>
+          <h2 id="proposal-dialog-title" style={{ margin: 0 }}>
+            {t('proposalDetail.title', { id: String(p.id) })}
+          </h2>
           <button
             ref={closeButtonRef}
             onClick={onClose}
-            aria-label="Close proposal detail dialog"
+            aria-label={t('proposalDetail.closeDialog')}
             style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
           >×</button>
         </div>
@@ -341,7 +359,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                 fontWeight: 500,
               }}
             >
-              💬 Discussion
+              💬 {t('proposalDetail.discussion')}
             </a>
           </p>
         )}
@@ -350,8 +368,8 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
           <tbody>
             {[
-              ['State', p.state],
-              ['Proposer', (
+              [t('proposalDetail.state'), p.state],
+              [t('proposalDetail.proposer'), (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                   <a
                     href={explorerAccountUrl(p.proposer)}
@@ -365,7 +383,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                   </a>
                   <button
                     onClick={() => setShowFullProposer(s => !s)}
-                    aria-label={showFullProposer ? 'Hide full proposer address' : 'Reveal full proposer address'}
+                    aria-label={showFullProposer ? t('proposalDetail.hideProposer') : t('proposalDetail.revealProposer')}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '0.75rem', padding: 0 }}
                   >
                     {showFullProposer ? '🙈' : '👁'}
@@ -387,14 +405,10 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                   </button>
                 </span>
               )],
-              ['Start', formatDate(p.start_time)],
-              ['End', formatDate(p.end_time)],
-              ['Quorum', (
-                <span title={String(p.quorum)}>{formatWeight(p.quorum, decimals)}</span>
-              )],
-              ['Total Votes', (
-                <span title={String(total)}>{formatWeight(total, decimals)}</span>
-              )],
+              [t('proposalDetail.start'), formatDate(p.start_time)],
+              [t('proposalDetail.end'), formatDate(p.end_time)],
+              [t('proposalDetail.quorum'), formatTokenAmount(p.quorum, decimals)],
+              [t('proposalDetail.totalVotes'), formatTokenAmount(total, decimals)],
             ].map(([k, v]) => (
               <tr key={String(k)} style={{ borderBottom: '1px solid #e5e7eb' }}>
                 <td style={{ padding: '0.4rem 0', color: '#888', width: '40%' }}>{k}</td>
@@ -408,29 +422,31 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
         {isProposalActive && (
           <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-vote-cell, #f9fafb)', borderRadius: 8, border: '1px solid var(--border-color, #e5e7eb)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>Live Tally</span>
+              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {t('proposalDetail.liveTally')}
+              </span>
               {secondsAgo !== null && (
                 <span
                   aria-live="polite"
                   aria-atomic="true"
                   style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}
                 >
-                  Updated {secondsAgo}s ago
+                  {t('proposalDetail.updatedAgo', { seconds: secondsAgo })}
                 </span>
               )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', textAlign: 'center' }}>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#16a34a' }} title={String(tally.yes)}>{formatWeight(tally.yes, decimals)}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Yes</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#16a34a' }}>{formatTokenAmount(tally.yes, decimals)}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>{t('proposalDetail.yes')}</div>
               </div>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#dc2626' }} title={String(tally.no)}>{formatWeight(tally.no, decimals)}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>No</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#dc2626' }}>{formatTokenAmount(tally.no, decimals)}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>{t('proposalDetail.no')}</div>
               </div>
               <div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#6b7280' }} title={String(tally.abstain)}>{formatWeight(tally.abstain, decimals)}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>Abstain</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#6b7280' }}>{formatTokenAmount(tally.abstain, decimals)}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>{t('proposalDetail.abstain')}</div>
               </div>
             </div>
           </div>
@@ -484,12 +500,12 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                 }}
               >
                 <div style={{ fontWeight: 600, color: '#1e40af', marginBottom: '0.35rem' }}>
-                  🗳️ Your Voting Power
+                  🗳️ {t('proposalDetail.yourVotingPower')}
                 </div>
                 {votingPowerLoading ? (
                   <div
                     aria-busy="true"
-                    aria-label="Loading voting power"
+                    aria-label={t('proposalDetail.loadingVotingPower')}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -515,11 +531,11 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                   <>
                     <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                       <span>
-                        <span style={{ color: '#64748b' }}>Own balance: </span>
+                        <span style={{ color: '#64748b' }}>{t('proposalDetail.ownBalance')} </span>
                         <strong>{ownBalance !== null ? formatTokenAmount(ownBalance, decimals) : '—'}</strong>
                       </span>
                       <span>
-                        <span style={{ color: '#64748b' }}>Delegated: </span>
+                        <span style={{ color: '#64748b' }}>{t('proposalDetail.delegated')} </span>
                         <strong>{delegatedWeight !== null ? formatTokenAmount(delegatedWeight, decimals) : '—'}</strong>
                       </span>
                     </div>
@@ -536,7 +552,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                           fontWeight: 500,
                         }}
                       >
-                        ⚠️ You have 0 voting power. Acquire CVT tokens or receive a delegation to vote.
+                        ⚠️ {t('proposalDetail.zeroVotingPower')}
                       </div>
                     )}
                   </>
@@ -544,12 +560,12 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
               </div>
             )}
 
-            {hasVoted === null && <span>Checking vote status…</span>}
+            {hasVoted === null && <span>{t('proposalDetail.checkingVoteStatus')}</span>}
 
             {hasVoted && voteRecord && !voteConfirmation && (
               <span>
-                You voted <strong>{voteRecord.vote}</strong> with weight{' '}
-                <span title={String(voteRecord.weight)}>{formatWeight(voteRecord.weight, decimals)}</span>
+                {t('proposalDetail.youVoted')} <strong>{voteRecord.vote}</strong>{' '}
+                {t('proposalDetail.withWeight')} {formatTokenAmount(voteRecord.weight, decimals)}
               </span>
             )}
 
@@ -566,7 +582,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                       id="choice-legend"
                       style={{ margin: '0 0 0.5rem', color: '#374151', fontWeight: 500, fontSize: '0.875rem' }}
                     >
-                      Select your choice:
+                      {t('proposalDetail.selectChoice')}
                     </legend>
                     <ul
                       role="radiogroup"
@@ -599,6 +615,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                                 disabled={!canVote || isVoting}
                                 onChange={() => setSelectedChoiceIndex(idx)}
                                 aria-label={choiceLabel}
+                                aria-pressed={isSelected}
                                 style={{ accentColor: '#2563eb' }}
                               />
                               {choiceLabel}
@@ -626,7 +643,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                         fontSize: '0.875rem',
                       }}
                     >
-                      {isVoting ? 'Submitting…' : 'Submit Vote'}
+                      {isVoting ? t('proposalDetail.submitting') : t('proposalDetail.submitVote')}
                     </button>
                   </fieldset>
                 ) : (
@@ -637,9 +654,9 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                       id="vote-shortcut-hint"
                       style={{ margin: '0 0 0.5rem', color: '#374151' }}
                     >
-                      Cast your vote{' '}
+                      {t('proposalDetail.castYourVote')}{' '}
                       <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                        (keyboard shortcuts: <kbd>Y</kbd> Yes · <kbd>N</kbd> No · <kbd>A</kbd> Abstain)
+                        ({t('proposalDetail.keyboardShortcuts')}: <kbd>Y</kbd> {t('proposalDetail.yes')} · <kbd>N</kbd> {t('proposalDetail.no')} · <kbd>A</kbd> {t('proposalDetail.abstain')})
                       </span>
                     </p>
 
@@ -649,8 +666,9 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                       aria-labelledby="vote-shortcut-hint"
                       style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}
                     >
-                      {VOTE_CONFIG.map(({ vote, label, shortcut, emoji, color, shortcutKey }) => {
-                        const isCurrentVote = voteRecord?.vote === vote;
+                      {VOTE_CONFIG.map(({ vote, labelKey, shortcut, emoji, color, shortcutKey }) => {
+                        const label = t(labelKey);
+                        const isCurrentVote = voteRecord?.vote === label;
                         const isDisabled = !canVote;
 
                         return (
@@ -667,12 +685,12 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                         // Tooltip explains shortcut and disabled reason
                         title={
                           isVoting
-                            ? 'Submitting vote…'
+                            ? t('proposalDetail.submittingVote')
                             : !walletAddress
-                              ? 'Connect your wallet to vote'
+                              ? t('proposalDetail.connectWalletToVote')
                               : isDisabled
-                                ? 'Voting is not available for this proposal'
-                                : `${label} (shortcut: ${shortcut})`
+                                ? t('proposalDetail.votingUnavailable')
+                                : t('proposalDetail.voteWithShortcut', { label, shortcut })
                         }
                         disabled={isDisabled || isVoting}
                         style={{
@@ -688,7 +706,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                         }}
                       >
                         {isVoting
-                          ? 'Submitting…'
+                          ? t('proposalDetail.submitting')
                           : <>{emoji} {label} <kbd style={{ fontSize: '0.65rem', opacity: 0.75, marginLeft: '0.25rem' }}>{shortcut}</kbd></>
                         }
                       </button>
@@ -702,10 +720,23 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
           </div>
         )}
 
+        {/* Winning choice — shown after finalisation for multi-choice proposals */}
+        {!isProposalActive && hasChoices && winningChoiceIndex !== null && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{ marginTop: '1rem', padding: '0.75rem', background: '#dcfce7', borderRadius: 8, fontSize: '0.875rem', color: '#166534' }}
+          >
+            🏆 {t('proposalDetail.winningChoice', {
+              choice: safeChoices[winningChoiceIndex] ?? t('proposalDetail.choiceFallback', { index: winningChoiceIndex }),
+            })}
+          </div>
+        )}
+
         {/* Connect wallet prompt */}
         {!walletAddress && (
           <div style={{ padding: '0.75rem', background: '#fef3c7', borderRadius: 8, fontSize: '0.875rem', color: '#92400e' }}>
-            ℹ️ Connect your wallet to vote on this proposal
+            ℹ️ {t('proposalDetail.connectWalletPrompt')}
           </div>
         )}
 
@@ -726,21 +757,21 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             role="status"
             style={{ marginTop: '1rem', padding: '0.75rem', background: '#e0e7ff', borderRadius: 8, fontSize: '0.875rem', color: '#3730a3' }}
           >
-            ✓ You have already voted <strong>{voteRecord.vote}</strong> on this proposal
+            ✓ {t('proposalDetail.alreadyVoted')} <strong>{voteRecord.vote}</strong> {t('proposalDetail.onThisProposal')}
           </div>
         )}
 
         {/* Proposal not active */}
         {walletAddress && !isProposalActive && (
           <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
-            ℹ️ This proposal is not active and cannot receive new votes
+            ℹ️ {t('proposalDetail.notActive')}
           </div>
         )}
 
         {/* Voting not yet open or closed */}
         {walletAddress && isProposalActive && !votingOpen && (
           <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f3e8ff', borderRadius: 8, fontSize: '0.875rem', color: '#6b21a8' }}>
-            ℹ️ Voting is not open yet or has ended for this proposal
+            ℹ️ {t('proposalDetail.votingNotOpen')}
           </div>
         )}
       </div>
