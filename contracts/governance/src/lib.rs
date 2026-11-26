@@ -157,6 +157,10 @@ impl GovernanceContract {
     }
 
     /// Retrieve the current governance configuration.
+    ///
+    /// Returns all current governance parameters: admin, voting token,
+    /// minimum proposal balance, proposal cooldown, admin vote restriction
+    /// flag, and paused state.
     pub fn get_config(env: Env) -> GovernanceConfig {
         GovernanceConfig {
             admin: GovernanceStorage::admin(&env),
@@ -306,6 +310,9 @@ impl GovernanceContract {
     }
 
     /// Total number of proposals created.
+    ///
+    /// Returns the current `ProposalCount` from instance storage. Defaults to
+    /// 0 when no proposals have been created yet.
     pub fn proposal_count(env: Env) -> u64 {
         GovernanceStorage::proposal_count(&env)
     }
@@ -682,6 +689,9 @@ impl GovernanceContract {
         let mut proposal = GovernanceStorage::proposal(&env, proposal_id)
             .ok_or(ContractError::ProposalNotFound)?;
 
+        // Guard against double-finalise: only an Active proposal may be
+        // finalised. Any other state (Passed, Rejected, Executed, Cancelled)
+        // returns ProposalNotActive before any state mutation occurs.
         if proposal.state != ProposalState::Active {
             return Err(ContractError::ProposalNotActive);
         }

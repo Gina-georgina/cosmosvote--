@@ -263,9 +263,10 @@ Emitted on an immediate (single-step) admin transfer.
 
 ---
 
-### `paused`
+### `ContractPaused`
 
-Emitted when the admin pauses the contract.
+Emitted when the admin pauses the contract (`pause`). The payload is the
+`ContractPaused { admin }` struct, encoded as a single-field tuple.
 
 | Field | Topic index | Type | Description |
 |-------|-------------|------|-------------|
@@ -274,20 +275,21 @@ Emitted when the admin pauses the contract.
 
 | Field | Data index | Type | Description |
 |-------|------------|------|-------------|
-| admin | — | Address | Admin that paused (scalar, not tuple) |
+| admin | 0 | Address | Admin that paused the contract |
 
 ```json
 {
   "topics": ["gov", "paused"],
-  "data": "GABC...ADMIN"
+  "data": ["GABC...ADMIN"]
 }
 ```
 
 ---
 
-### `unpaused`
+### `ContractUnpaused`
 
-Emitted when the admin resumes the contract.
+Emitted when the admin resumes the contract (`unpause`). The payload is the
+`ContractUnpaused { admin }` struct, encoded as a single-field tuple.
 
 | Field | Topic index | Type | Description |
 |-------|-------------|------|-------------|
@@ -296,12 +298,12 @@ Emitted when the admin resumes the contract.
 
 | Field | Data index | Type | Description |
 |-------|------------|------|-------------|
-| admin | — | Address | Admin that unpaused (scalar, not tuple) |
+| admin | 0 | Address | Admin that unpaused the contract |
 
 ```json
 {
   "topics": ["gov", "unpause"],
-  "data": "GABC...ADMIN"
+  "data": ["GABC...ADMIN"]
 }
 ```
 

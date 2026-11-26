@@ -112,9 +112,9 @@ async function getProposal(contractId: string, proposalId: bigint) {
 
 | Field | Detail |
 |-------|--------|
-| **Trigger** | An action that requires `ProposalState::Active` (vote, amend, cancel, finalize-retry) is called after the state has already transitioned. |
-| **Common causes** | Voting on an already-finalized or cancelled proposal; attempting to finalize an already-finalized proposal. |
-| **Client action** | Check `proposal.state` before submitting. Display a clear status badge (`Passed`, `Rejected`, `Executed`, or `Cancelled`) and disable action buttons accordingly. |
+| **Trigger** | An action that requires `ProposalState::Active` (vote, amend, cancel, finalize-retry) is called after the state has already transitioned. In particular, `finalise()` returns this error whenever the proposal state is not `Active` — including a second `finalise()` call on a proposal that is already `Passed`, `Rejected`, `Executed`, or `Cancelled`. |
+| **Common causes** | Voting on an already-finalized or cancelled proposal; attempting to finalize an already-finalized proposal; double-finalising a proposal (e.g. a retried transaction that already landed, or two clients racing to finalise the same proposal). |
+| **Client action** | Check `proposal.state` before submitting. Display a clear status badge (`Passed`, `Rejected`, `Executed`, or `Cancelled`) and disable action buttons accordingly. Before calling `finalise()`, fetch the proposal with `get_proposal(id)` and only submit when `state == Active`; treat a `ProposalNotActive` error on finalise as a no-op (the proposal is already finalised and no state was mutated). |
 
 #### `ProposalNotPassed` — code 12
 
