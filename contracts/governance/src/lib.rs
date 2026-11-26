@@ -737,15 +737,24 @@ impl GovernanceContract {
         let mut proposal = GovernanceStorage::proposal(&env, proposal_id)
             .ok_or(ContractError::ProposalNotFound)?;
 
-        if proposal.state != ProposalState::Passed {
+        if proposal.state != ProposalState::Passed && proposal.state != ProposalState::ExecutionFailed {
             return Err(ContractError::ProposalNotPassed);
         }
 
-        // Invoke treasury disbursement if a payload is attached
+        // Invoke treasury disbursement if a payload is attached. A failed
+        // cross-contract call leaves the proposal in `ExecutionFailed` rather
+        // than `Passed`, so state stays consistent and the admin can retry
+        // `execute()` once the underlying issue (e.g. insufficient treasury
+        // balance) is resolved.
         if let Some(action) = proposal.treasury_action.get(0) {
             if let Some(treasury_addr) = GovernanceStorage::treasury_contract(&env) {
                 let treasury = TreasuryClient::new(&env, &treasury_addr);
-                treasury.disburse(&action);
+                if treasury.try_disburse(&action).is_err() {
+                    proposal.state = ProposalState::ExecutionFailed;
+                    GovernanceStorage::set_proposal(&env, proposal_id, &proposal);
+                    GovernanceEvents::proposal_finalized(&env, proposal_id, &proposal.state);
+                    return Err(ContractError::ExecutionFailed);
+                }
             }
         }
 

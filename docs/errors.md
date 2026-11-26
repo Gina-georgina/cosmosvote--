@@ -411,6 +411,7 @@ async function getVotingPower(
 | **Trigger** | The on-chain treasury disbursement via `disburse()` fails during `execute()`. |
 | **Common causes** | Treasury contract not deployed or paused; insufficient treasury balance for the requested disbursement; cross-contract invocation error. |
 | **Client action** | Inspect the transaction's diagnostic events for the treasury sub-call failure. Resolve the treasury issue and retry `execute()`. |
+| **Proposal state** | The proposal is moved to `ProposalState::ExecutionFailed` instead of being left in `Passed` (which would misleadingly suggest execution never ran) or `Executed` (which would misreport success). `execute()` accepts proposals in either `Passed` or `ExecutionFailed` state, so the admin can call `execute()` again after fixing the underlying issue — it will retry the disbursement and move to `Executed` on success. |
 
 ---
 
