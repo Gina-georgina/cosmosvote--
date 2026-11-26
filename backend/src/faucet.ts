@@ -20,6 +20,7 @@ const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_IP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
+const WAL_CHECKPOINT_PAGE_THRESHOLD = 1000;
 
 export class FaucetDatabaseUnavailableError extends Error {
   constructor(message: string, readonly cause?: unknown) {
@@ -123,7 +124,10 @@ export class FaucetClaimStore {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db.open) {
+      this.checkpoint();
+      this.db.close();
+    }
   }
 }
 

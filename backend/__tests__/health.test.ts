@@ -35,7 +35,7 @@ describe('health endpoints', () => {
   });
 
   it('returns liveness status and uptime', async () => {
-    server = createHealthServer(async () => true, () => 12.5);
+    server = createHealthServer(async () => true, () => 12.5, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const result = await request(server, '/health');
@@ -46,7 +46,7 @@ describe('health endpoints', () => {
 
   it('returns 200 when ready and 503 when the dependency is not ready', async () => {
     let ready = true;
-    server = createHealthServer(async () => ready);
+    server = createHealthServer(async () => ready, undefined, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     expect((await request(server, '/ready')).statusCode).toBe(200);
@@ -55,7 +55,7 @@ describe('health endpoints', () => {
   });
 
   it('sets security headers on health responses', async () => {
-    server = createHealthServer(async () => true, () => 1);
+    server = createHealthServer(async () => true, () => 1, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const { headers } = await request(server, '/health');
@@ -105,7 +105,7 @@ describe('health endpoints', () => {
 
   it('sets security headers on readiness responses, including 503', async () => {
     let ready = true;
-    server = createHealthServer(async () => ready);
+    server = createHealthServer(async () => ready, undefined, async () => true);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     const okResponse = await request(server, '/ready');

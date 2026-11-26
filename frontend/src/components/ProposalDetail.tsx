@@ -134,12 +134,31 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
   const isProposalActive = p.state === 'Active';
 
+  // Optimistic vote state from the proposal store (issue #400)
+  const applyOptimisticVote = useProposalStore(s => s.applyOptimisticVote);
+  const reconcileOptimisticVote = useProposalStore(s => s.reconcileOptimisticVote);
+
   // Fetch latest tally from chain
   const fetchTally = useCallback(async () => {
     const fresh = await fetchProposal(Number(p.id));
-    setTally({ yes: fresh.votes_yes, no: fresh.votes_no, abstain: fresh.votes_abstain });
+    // Reconcile any optimistic vote against the server tally. If the server
+    // value conflicts with the optimistic value, roll back to server values.
+    const reconciled = reconcileOptimisticVote(Number(p.id), {
+      yes: fresh.votes_yes,
+      no: fresh.votes_no,
+      abstain: fresh.votes_abstain,
+    });
+    setTally({
+      yes: reconciled.tally.yes,
+      no: reconciled.tally.no,
+      abstain: reconciled.tally.abstain,
+    });
+    if (reconciled.rolledBack) {
+      setHasVoted(false);
+      setVoteRecord(null);
+    }
     setLastUpdated(new Date());
-  }, [p.id]);
+  }, [p.id, reconcileOptimisticVote]);
 
   // Poll every TALLY_POLL_INTERVAL ms while Active
   usePolling(fetchTally, { interval: TALLY_POLL_INTERVAL, enabled: isProposalActive });

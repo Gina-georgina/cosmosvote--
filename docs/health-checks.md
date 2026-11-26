@@ -76,12 +76,25 @@ services:
 
   backend:
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
+```
 
-Use `/ready` for readiness probes. `/health` only indicates that the backend process is running. This backend has no database; `/ready` checks the configured Soroban RPC using `getHealth` and returns HTTP 503 if the RPC is unreachable or unhealthy.
+Use `/health/ready` for readiness probes. `/health/live` only indicates that the backend process is running and always returns HTTP 200 while the process is up. `/health/ready` checks both the database connection and the configured Soroban RPC (using `getHealth`), and returns HTTP 503 if the database connection fails or the RPC is unreachable or unhealthy.
+
+For orchestrators that support separate liveness and readiness probes (e.g. Kubernetes), point the liveness probe at `/health/live` and the readiness probe at `/health/ready`:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
 ```
 
 ### Cron-Based Probe Script
@@ -119,6 +132,7 @@ Add to crontab (every 5 minutes):
 |---------|-------------|
 | Frontend down | `docker compose restart frontend` or redeploy static build |
 | Notification service down | `docker compose restart notification`; check logs with `docker compose logs notification` |
+| Database connection failing (`/health/ready` returns 503) | Verify the database is running and reachable; check `DATABASE_URL` and connection pool settings, then `docker compose restart backend` |
 | Horizon RPC unreachable | Switch `STELLAR_HORIZON_URL` to a fallback endpoint (e.g., `https://horizon.stellar.org`) |
 | Soroban RPC unhealthy | Check ledger sync status; switch `STELLAR_RPC_URL` to alternate RPC provider |
 | All services down | Restart full stack: `docker compose down && docker compose up -d` |

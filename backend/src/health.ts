@@ -6,7 +6,8 @@ import { sendProblem, PROBLEM_TYPES } from './problemJson';
 
 export function createHealthServer(
   checkReadiness: () => Promise<boolean>,
-  getUptime: () => number = () => process.uptime()
+  getUptime: () => number = () => process.uptime(),
+  checkDatabase: () => Promise<boolean> = async () => true
 ): Server {
   const limiter = new RateLimiter();
   // Clean up stale entries every 5 minutes
@@ -55,6 +56,7 @@ export function createHealthServer(
       return;
     }
 
+    // Backwards-compatible readiness endpoint; now also fails when DB is down.
     if (request.method === 'GET' && request.url === '/ready') {
       const ready = await checkReadiness().catch(() => false);
       if (!ready) {

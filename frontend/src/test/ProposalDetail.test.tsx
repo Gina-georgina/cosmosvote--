@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProposalDetail } from '../components/ProposalDetail';
+import { useProposalStore } from '../store/proposalStore';
 import type { Proposal } from '../types';
 
 const mockCastVote = vi.fn().mockResolvedValue(undefined);

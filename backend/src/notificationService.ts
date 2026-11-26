@@ -1,6 +1,22 @@
 /**
  * Notification service — polls Horizon/Soroban RPC for contract events
  * and delivers them to configured webhooks.
+ *
+ * Outgoing webhook payloads are signed with HMAC-SHA256 when a shared
+ * secret is configured (via `WEBHOOK_SECRET`). The signature is sent in
+ * the `X-CosmosVote-Signature` header as `sha256=<hex>`.
+ *
+ * Verification example (Node.js):
+ *
+ *   import crypto from 'crypto';
+ *
+ *   const expected = 'sha256=' + crypto
+ *     .createHmac('sha256', process.env.WEBHOOK_SECRET!)
+ *     .update(rawRequestBody) // the exact bytes received, before JSON.parse
+ *     .digest('hex');
+ *
+ *   const received = req.headers['x-cosmosvote-signature'];
+ *   const valid = received === expected; // use timingSafeEqual in production
  */
 
 import axios from 'axios';
@@ -37,6 +53,11 @@ function getHttpStatus(error: unknown): number | undefined {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function computeSignature(rawBody: string, secret: string): string {
+  const hex = createHmac('sha256', secret).update(rawBody).digest('hex');
+  return `${SIGNATURE_PREFIX}${hex}`;
 }
 
 export interface WebhookPayload {
@@ -144,6 +165,16 @@ export class NotificationService {
   }
 
   async deliverWebhook(payload: WebhookPayload): Promise<void> {
+    // Serialize once so the signature is computed over the exact bytes sent.
+    const rawBody = JSON.stringify(payload);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.webhookSecret) {
+      headers[SIGNATURE_HEADER] = computeSignature(rawBody, this.webhookSecret);
+    }
+
     for (let attempt = 0; attempt <= MAX_WEBHOOK_RETRIES; attempt += 1) {
       const validation = validateWebhookUrl(this.config.webhookUrl);
       if (!validation.ok) {
@@ -163,9 +194,10 @@ export class NotificationService {
 
       const end = webhookLatencySeconds.startTimer({ contract_id: this.config.contractId });
       try {
-        const response = await axios.post(this.config.webhookUrl, payload, {
+        const response = await axios.post(this.config.webhookUrl, rawBody, {
           timeout: 5_000,
           maxRedirects: 0,
+          headers,
         });
         end({ status_code: String(response.status) });
         notificationSentTotal.inc({ contract_id: this.config.contractId });

@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import type { Proposal, VoteRecord } from '../types';
 import { fetchAllProposals, fetchTokenDecimals, fetchHasVoted, fetchVoteRecord } from '../api';
 
+export interface OptimisticVote {
+  vote: boolean;
+  weight: number;
+  /** Proposal tally snapshot before the optimistic update was applied */
+  previousTally: { yes: number; no: number };
+}
+
 interface ProposalState {
   proposals: Proposal[];
   decimals: number;
@@ -59,6 +66,8 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
         fetchTokenDecimals(),
       ]);
       set({ proposals, decimals, loading: false, progress: null });
+      // Reconcile any pending optimistic votes against the fresh server data.
+      get().reconcileVotes(proposals);
     } catch (err) {
       set({ error: String(err), loading: false, progress: null });
     }
