@@ -22,6 +22,13 @@ const envSchema = z.object({
 
   APP_VERSION: z.string().optional(),
 
+  // ── Build metadata (injected at build time) ───────────────────────────────
+  VERSION: z.string().default('unknown'),
+
+  COMMIT_SHA: z.string().default('unknown'),
+
+  BUILD_DATE: z.string().default('unknown'),
+
   // ── Stellar / contract ────────────────────────────────────────────────────
   STELLAR_RPC_URL: z.string().url().default('http://localhost:8000'),
 

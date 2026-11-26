@@ -32,7 +32,24 @@ function shutdown(): void {
     store.close();
     process.exit(0);
   });
+
+  let shuttingDown = false;
+  function shutdown(): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close(() => {
+      store.close();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+main().catch((error) => {
+  console.error(
+    `Failed to start faucet service: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exit(1);
+});

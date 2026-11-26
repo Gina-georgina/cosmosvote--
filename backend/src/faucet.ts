@@ -18,42 +18,105 @@ const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
 
+export class FaucetDatabaseUnavailableError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = 'FaucetDatabaseUnavailableError';
+  }
+}
+
+function isDatabaseUnavailable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    /database is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(error.message)
+  );
+}
+
 export class FaucetClaimStore {
   private readonly db: Database.Database;
+  // FIFO queue that serializes all write operations on the single connection.
+  private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(databasePath: string) {
     if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new Database(databasePath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS faucet_claims (
-        wallet_address TEXT PRIMARY KEY,
-        claimed_at_ms INTEGER NOT NULL
-      )
-    `);
+    try {
+      this.db = new Database(databasePath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('busy_timeout = 5000');
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS faucet_claims (
+          wallet_address TEXT PRIMARY KEY,
+          claimed_at_ms INTEGER NOT NULL
+        )
+      `);
+      // Verify the connection is healthy before serving traffic.
+      this.db.prepare('SELECT 1').get();
+    } catch (error) {
+      throw new FaucetDatabaseUnavailableError(
+        `Faucet database is unavailable at ${databasePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error,
+      );
+    }
   }
 
-  reserve(address: string, now = Date.now()): number | null {
-    const cutoff = now - CLAIM_COOLDOWN_MS;
-    const reserve = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
-      const result = this.db.prepare(
-        'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
-      ).run(address, now);
-      return result.changes === 1;
+  private enqueueWrite<T>(operation: () => T): Promise<T> {
+    const run = this.writeQueue.then(operation, operation);
+    // Keep the chain alive even if an operation rejects.
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private wrapError(error: unknown): never {
+    if (isDatabaseUnavailable(error)) {
+      throw new FaucetDatabaseUnavailableError(
+        'Faucet database is temporarily unavailable.',
+        error,
+      );
+    }
+    throw error;
+  }
+
+  reserve(address: string, now = Date.now()): Promise<number | null> {
+    return this.enqueueWrite(() => {
+      try {
+        const cutoff = now - CLAIM_COOLDOWN_MS;
+        const reserve = this.db.transaction(() => {
+          this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
+          const result = this.db.prepare(
+            'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
+          ).run(address, now);
+          return result.changes === 1;
+        });
+
+        if (reserve()) return null;
+        const claim = this.db.prepare(
+          'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
+        ).get(address) as { claimed_at_ms: number } | undefined;
+        return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
+      } catch (error) {
+        this.wrapError(error);
+      }
     });
-
-    if (reserve()) return null;
-    const claim = this.db.prepare(
-      'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
-    ).get(address) as { claimed_at_ms: number } | undefined;
-    return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
   }
 
-  release(address: string, claimedAt: number): void {
-    this.db.prepare(
-      'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
-    ).run(address, claimedAt);
+  release(address: string, claimedAt: number): Promise<void> {
+    return this.enqueueWrite(() => {
+      try {
+        this.db.prepare(
+          'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
+        ).run(address, claimedAt);
+      } catch (error) {
+        this.wrapError(error);
+      }
+    });
   }
 
   close(): void {
@@ -204,7 +267,17 @@ export function createFaucetServer(
     }
 
     const now = Date.now();
-    const retryAt = store.reserve(address, now);
+    let retryAt: number | null;
+    try {
+      retryAt = await store.reserve(address, now);
+    } catch (error) {
+      if (error instanceof FaucetDatabaseUnavailableError) {
+        response.setHeader('Retry-After', '5');
+        sendJson(response, 503, { error: 'Faucet database is temporarily unavailable. Please retry shortly.' });
+        return;
+      }
+      throw error;
+    }
     if (retryAt !== null) {
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
       sendJson(response, 429, { error: 'This wallet has already claimed test tokens in the last 24 hours.', retryAt });
@@ -221,7 +294,11 @@ export function createFaucetServer(
       });
     } catch (error) {
       if (!(error instanceof FaucetMintError) || !error.claimConsumed) {
-        store.release(address, now);
+        try {
+          await store.release(address, now);
+        } catch (releaseError) {
+          if (!(releaseError instanceof FaucetDatabaseUnavailableError)) throw releaseError;
+        }
       }
       sendJson(response, 502, {
         error: error instanceof Error ? error.message : 'Faucet mint failed.',

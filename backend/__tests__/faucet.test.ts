@@ -22,36 +22,41 @@ describe('FaucetClaimStore', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it('allows one claim and returns the cooldown expiry for duplicates', () => {
+  it('allows one claim and returns the cooldown expiry for duplicates', async () => {
     const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
     const now = 1_800_000_000_000;
 
-    expect(store.reserve('GTESTWALLET', now)).toBeNull();
-    expect(store.reserve('GTESTWALLET', now + 1)).toBe(now + 24 * 60 * 60 * 1000);
+    await expect(store.reserve('GTESTWALLET', now)).resolves.toBeNull();
+    await expect(store.reserve('GTESTWALLET', now + 1)).resolves.toBe(now + 24 * 60 * 60 * 1000);
     store.close();
   });
 
-  it('retains cooldowns across database reopen and expires them after 24 hours', () => {
+  it('retains cooldowns across database reopen and expires them after 24 hours', async () => {
     const path = join(directory, 'claims.sqlite');
     const now = 1_800_000_000_000;
     const first = new FaucetClaimStore(path);
-    first.reserve('GTESTWALLET', now);
+    await first.reserve('GTESTWALLET', now);
     first.close();
 
     const reopened = new FaucetClaimStore(path);
-    expect(reopened.reserve('GTESTWALLET', now + 10)).toBe(now + 24 * 60 * 60 * 1000);
-    expect(reopened.reserve('GTESTWALLET', now + 24 * 60 * 60 * 1000)).toBeNull();
+    await expect(reopened.reserve('GTESTWALLET', now + 10)).resolves.toBe(now + 24 * 60 * 60 * 1000);
+    await expect(reopened.reserve('GTESTWALLET', now + 24 * 60 * 60 * 1000)).resolves.toBeNull();
     reopened.close();
   });
 
-  it('releases a reservation when minting fails before submission', () => {
+  it('releases a reservation when minting fails before submission', async () => {
     const store = new FaucetClaimStore(join(directory, 'claims.sqlite'));
     const now = 1_800_000_000_000;
 
-    store.reserve('GTESTWALLET', now);
-    store.release('GTESTWALLET', now);
-    expect(store.reserve('GTESTWALLET', now + 1)).toBeNull();
+    await store.reserve('GTESTWALLET', now);
+    await store.release('GTESTWALLET', now);
+    await expect(store.reserve('GTESTWALLET', now + 1)).resolves.toBeNull();
     store.close();
+  });
+
+  it('throws when the database path is unavailable', () => {
+    const missingDirectory = join(directory, 'does-not-exist', 'nested', 'claims.sqlite');
+    expect(() => new FaucetClaimStore(missingDirectory)).toThrow();
   });
 });
 
@@ -191,5 +196,24 @@ describe('faucet endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(mint).not.toHaveBeenCalled();
+  });
+
+  it('handles 50 concurrent claims without SQLITE_BUSY errors', async () => {
+    const addresses = Array.from({ length: 50 }, () => Keypair.random().publicKey());
+
+    const responses = await Promise.all(addresses.map(address => fetch(`${baseUrl}/api/faucet/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: config.allowedOrigin },
+      body: JSON.stringify({ address }),
+    })));
+
+    const bodies = await Promise.all(responses.map(response => response.text()));
+    for (const response of responses) {
+      expect(response.status).toBeLessThan(500);
+    }
+    for (const body of bodies) {
+      expect(body).not.toMatch(/SQLITE_BUSY/i);
+    }
+    expect(mint).toHaveBeenCalledTimes(50);
   });
 });
