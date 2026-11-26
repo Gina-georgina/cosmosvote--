@@ -345,7 +345,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
     setVoteError(null);
     setVoteConfirmation(null);
     try {
-      await castVote(walletAddress, Number(p.id), voteInput, signTransaction);
+      const txHash = await castVote(walletAddress, Number(p.id), voteInput, signTransaction);
       setHasVoted(true);
       const voteLabel =
         typeof voteInput === 'object' && 'choice' in voteInput
@@ -410,7 +410,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Discussion link — shown only when discussion_url is a valid HTTPS URL */}
         {p.discussion_url && /^https:\/\/.+/.test(p.discussion_url) && (
-          <p style={{ marginBottom: '1rem' }}>
+          <p className="no-print" style={{ marginBottom: '1rem' }}>
             <a
               href={p.discussion_url}
               target="_blank"
@@ -490,13 +490,14 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* Live tally — updated via polling while Active */}
         {isProposalActive && (
-          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-vote-cell, #f9fafb)', borderRadius: 8, border: '1px solid var(--border-color, #e5e7eb)' }}>
+          <div className="print-tally" style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-vote-cell, #f9fafb)', borderRadius: 8, border: '1px solid var(--border-color, #e5e7eb)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
                 {t('proposalDetail.liveTally')}
               </span>
               {secondsAgo !== null && (
                 <span
+                  className="no-print"
                   aria-live="polite"
                   aria-atomic="true"
                   style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}
@@ -556,7 +557,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
 
         {/* ── Vote section ── */}
         {walletAddress && (
-          <div style={{ padding: '0.75rem', background: '#f0f9ff', borderRadius: 8, fontSize: '0.875rem', marginBottom: '1rem' }}>
+          <div className="no-print" style={{ padding: '0.75rem', background: '#f0f9ff', borderRadius: 8, fontSize: '0.875rem', marginBottom: '1rem' }}>
             {/* Voting power panel — issue #20 */}
             {hasVoted === false && isProposalActive && (
               <div
@@ -825,16 +826,19 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
             users can see an estimate before connecting. When walletAddress is
             present the preview reflects the user's pending vote in real time. */}
         {isProposalActive && walletAddress && hasVoted === false && (
-          <VoteSimulationPreview
-            proposalId={Number(p.id)}
-            walletAddress={walletAddress}
-          />
+          <div className="no-print">
+            <VoteSimulationPreview
+              proposalId={Number(p.id)}
+              walletAddress={walletAddress}
+            />
+          </div>
         )}
 
         {/* Already voted confirmation (when loaded from chain, not just submitted) */}
         {walletAddress && hasVoted && !voteConfirmation && voteRecord && (
           <div
             role="status"
+            className="no-print"
             style={{ marginTop: '1rem', padding: '0.75rem', background: '#e0e7ff', borderRadius: 8, fontSize: '0.875rem', color: '#3730a3' }}
           >
             ✓ {t('proposalDetail.alreadyVoted')} <strong>{voteRecord.vote}</strong> {t('proposalDetail.onThisProposal')}
