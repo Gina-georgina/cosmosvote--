@@ -17,6 +17,10 @@
 
   "loading_proposals": "Loading proposals...",
   "no_proposals": "No proposals found.",
+  "empty_state_title": "No proposals yet",
+  "empty_state_message": "Be the first to shape the future of this community by creating a proposal.",
+  "empty_state_cta": "Create Proposal",
+  "empty_state_connect_prompt": "Connect wallet to propose",
 
   "card_ends": "Ends",
   "card_quorum": "Quorum",

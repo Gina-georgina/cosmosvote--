@@ -663,6 +663,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                       }}
                       disabled={!canVote || isVoting || selectedChoiceIndex === null}
                       aria-disabled={!canVote || isVoting || selectedChoiceIndex === null}
+                      aria-busy={isVoting}
                       style={{
                         padding: '0.6rem 1.25rem',
                         background: !canVote || isVoting || selectedChoiceIndex === null ? '#e5e7eb' : '#2563eb',
@@ -672,6 +673,10 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                         cursor: !canVote || isVoting || selectedChoiceIndex === null ? 'not-allowed' : 'pointer',
                         fontWeight: 600,
                         fontSize: '0.875rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
                       }}
                     >
                       {isVoting ? t('proposalDetail.submitting') : t('proposalDetail.submitVote')}
@@ -724,6 +729,7 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                                 : t('proposalDetail.voteWithShortcut', { label, shortcut })
                         }
                         disabled={isDisabled || isVoting}
+                        aria-busy={isVoting}
                         style={{
                           padding: '0.75rem',
                           background: isDisabled || isVoting ? '#e5e7eb' : color,
@@ -734,6 +740,10 @@ export function ProposalDetail({ proposal: p, decimals, walletAddress, adminAddr
                           fontWeight: 500,
                           opacity: isDisabled || isVoting ? 0.6 : 1,
                           position: 'relative',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.5rem',
                         }}
                       >
                         {isVoting
