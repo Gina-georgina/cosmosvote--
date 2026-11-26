@@ -40,6 +40,27 @@ export function formatTokenAmount(
 }
 
 /**
+ * Returns true only when `value` parses as a URL whose protocol is exactly
+ * `https:`. Used to validate optional link fields (e.g. proposal discussion
+ * URLs) before submission.
+ *
+ * @param value The raw string to validate.
+ * @returns Whether the value is a valid HTTPS URL.
+ */
+export function isValidHttpsUrl(value: string): boolean {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Maximum length (in characters) of a sanitized wallet-facing message.
  */
 export const WALLET_MESSAGE_MAX_LENGTH = 200;

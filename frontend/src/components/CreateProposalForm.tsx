@@ -24,6 +24,7 @@ interface FormState {
   description: string;
   quorum: string;
   duration: string;
+  discussion_url: string;
 }
 
 const INITIAL_FORM: FormState = {
@@ -31,6 +32,7 @@ const INITIAL_FORM: FormState = {
   description: '',
   quorum: '1000',
   duration: '86400', // 1 day in seconds
+  discussion_url: '',
 };
 
 const DRAFT_NAMESPACE = 'cosmosvote:proposal_draft:';
@@ -96,7 +98,13 @@ async function loadDraft(walletAddress: string): Promise<FormState | null> {
       typeof parsed.quorum === 'string' &&
       typeof parsed.duration === 'string'
     ) {
-      return parsed as FormState;
+      return {
+        title: parsed.title,
+        description: parsed.description,
+        quorum: parsed.quorum,
+        duration: parsed.duration,
+        discussion_url: typeof parsed.discussion_url === 'string' ? parsed.discussion_url : '',
+      };
     }
     return null;
   } catch {
@@ -227,7 +235,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Mark all fields as touched to show validation errors
-    setTouched({ title: true, description: true, quorum: true, duration: true });
+    setTouched({ title: true, description: true, quorum: true, duration: true, discussion_url: true });
     if (hasErrors) return;
 
     setSubmitting(true);
@@ -249,6 +257,9 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
       // before they are embedded in the transaction (and shown by the wallet).
       const safeTitle = sanitizeWalletMessage(form.title.trim(), 128);
       const safeDescription = sanitizeWalletMessage(form.description.trim(), 1024);
+      const safeDiscussionUrl = form.discussion_url.trim()
+        ? sanitizeWalletMessage(form.discussion_url.trim(), 512)
+        : '';
 
       const tx = new TransactionBuilder(account, {
         fee: '1000000', // 0.1 XLM max fee — governance calls are compute-heavy
@@ -264,6 +275,7 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
               nativeToScVal(safeDescription, { type: 'string' }),
               nativeToScVal(BigInt(Math.round(Number(form.quorum))), { type: 'i128' }),
               nativeToScVal(BigInt(Math.round(Number(form.duration))), { type: 'u64' }),
+              nativeToScVal(safeDiscussionUrl, { type: 'string' }),
             ],
           })
         )
@@ -589,6 +601,27 @@ export function CreateProposalForm({ walletAddress, onSuccess, onCancel }: Props
                     days: (Number(form.duration) / 86400).toFixed(1),
                   })}
                 </div>
+              )}
+            </div>
+
+            {/* Discussion link (optional) */}
+            <div>
+              <label htmlFor="cp-discussion-url" style={labelStyle}>
+                Discussion link
+              </label>
+              <input
+                id="cp-discussion-url"
+                type="url"
+                value={form.discussion_url}
+                onChange={e => handleChange('discussion_url', e.target.value)}
+                onBlur={() => handleBlur('discussion_url')}
+                placeholder="https://forum.example.com/t/proposal"
+                style={inputStyle('discussion_url')}
+                aria-describedby={errors.discussion_url ? 'cp-discussion-url-error' : undefined}
+                aria-invalid={touched.discussion_url && !!errors.discussion_url}
+              />
+              {touched.discussion_url && errors.discussion_url && (
+                <span id="cp-discussion-url-error" style={errorStyle}>{errors.discussion_url}</span>
               )}
             </div>
 
