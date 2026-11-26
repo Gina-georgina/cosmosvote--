@@ -155,6 +155,57 @@ fn bench_cast_vote() {
     check_against_baseline("cast_vote", instructions);
 }
 
+/// Issue #471: the typical (happy-path) vote must stay at least 10% below the
+/// pre-optimisation baseline recorded in `tests/baselines/perf_contract_execution.json`
+/// under `cast_vote_pre_optimisation`. This guards against regressions that
+/// reintroduce redundant storage reads in `cast_vote`.
+///
+/// The benchmark exercises the reordered fail-fast path: the cheap guards
+/// (proposal existence/state and the `has_voted` flag) run before the more
+/// expensive voter-balance and delegation lookups, so a typical vote performs
+/// the minimum number of ledger reads.
+#[test]
+fn bench_cast_vote_optimised_path() {
+    let (env, gov, token, admin, proposer) = setup_env();
+
+    let id = gov.create_proposal(
+        &proposer,
+        &String::from_str(&env, "Vote Benchmark"),
+        &String::from_str(&env, "Measuring instruction count for cast_vote"),
+        &1_000_000i128,
+        &604_800u64,
+        &None,
+        &None,
+    );
+
+    let voter = Address::generate(&env);
+    token.mint(&admin, &voter, &1_000i128);
+
+    env.as_contract(&gov.address, || {
+        env.budget().reset_unlimited();
+    });
+    let instructions_before = env.budget().cpu_instruction_cost();
+    gov.cast_vote(&voter, &id, &Vote::Yes);
+    let instructions = env.budget().cpu_instruction_cost() - instructions_before;
+
+    // Keep the standard baseline check (10% tolerance) for the current path.
+    check_against_baseline("cast_vote", instructions);
+
+    // Additionally assert the optimised path is >= 10% cheaper than the
+    // pre-optimisation baseline. Skip when refreshing baselines.
+    if std::env::var("BENCH_UPDATE").ok().as_deref() == Some("1") {
+        return;
+    }
+    let pre = baseline_for("cast_vote_pre_optimisation");
+    let required = pre - (pre / 10);
+    assert!(
+        instructions <= required,
+        "cast_vote used {instructions} instructions, expected at least 10% below the \
+         pre-optimisation baseline {pre} (limit {required}); reordering/batching of storage \
+         reads in cast_vote may have regressed (see tests/baselines/perf_contract_execution.json)",
+    );
+}
+
 #[test]
 fn bench_finalise() {
     let (env, gov, token, admin, proposer) = setup_env();

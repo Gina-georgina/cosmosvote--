@@ -37,6 +37,10 @@ mod cross_contract_tests;
 mod validation_tests;
 #[cfg(test)]
 mod voter_cap_tests;
+#[cfg(test)]
+mod error_coverage_tests;
+#[cfg(test)]
+mod quorum_tests;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -415,6 +419,9 @@ impl GovernanceContract {
         voter.require_auth();
         Self::assert_ready(&env)?;
 
+        // Fail-fast ordering: the cheapest guards run first so that invalid or
+        // duplicate votes abort before any cross-contract (token) reads are
+        // performed. The proposal is read exactly once and reused below.
         let mut proposal = GovernanceStorage::proposal(&env, proposal_id)
             .ok_or(ContractError::ProposalNotFound)?;
 
@@ -430,6 +437,8 @@ impl GovernanceContract {
             return Err(ContractError::VotingPeriodEnded);
         }
 
+        // Cheap persistent-flag guard: reject double-votes before touching the
+        // token contract (delegation / balance / supply reads).
         if GovernanceStorage::has_voted(&env, proposal_id, &voter) {
             return Err(ContractError::AlreadyVoted);
         }

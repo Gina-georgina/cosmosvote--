@@ -235,3 +235,167 @@ fn test_yes_wins_by_one_token_passes() {
     finalise(&gov, &env, id);
     assert_eq!(gov.get_proposal(&id).state, ProposalState::Passed);
 }
+
+// ---------------------------------------------------------------------------
+// Abstain-only quorum (rejected: yes is not > no)
+// ---------------------------------------------------------------------------
+
+/// Abstains alone meet quorum exactly, but yes == no == 0 → Rejected.
+#[test]
+fn test_abstain_only_meets_quorum_exactly_rejects() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let abs_voter = make_voter(&env, &token, &admin, 2_500);
+    // quorum = 2_500; abstain = 2_500 → quorum exactly met, but no yes/no votes
+    let id = create_proposal(&gov, &env, &abs_voter, 2_500);
+    gov.cast_vote(&abs_voter, &id, &Vote::Abstain);
+    finalise(&gov, &env, id);
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Rejected);
+}
+
+/// Abstains exceed quorum, but yes == no == 0 → Rejected.
+#[test]
+fn test_abstain_only_above_quorum_rejects() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let abs_a = make_voter(&env, &token, &admin, 3_000);
+    let abs_b = make_voter(&env, &token, &admin, 2_000);
+    // quorum = 4_000; abstain = 5_000 > quorum, still no yes/no votes
+    let id = create_proposal(&gov, &env, &abs_a, 4_000);
+    gov.cast_vote(&abs_a, &id, &Vote::Abstain);
+    gov.cast_vote(&abs_b, &id, &Vote::Abstain);
+    finalise(&gov, &env, id);
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Rejected);
+}
+
+// ---------------------------------------------------------------------------
+// Tie rejection (yes == no) with quorum exactly met
+// ---------------------------------------------------------------------------
+
+/// Tie at exactly the quorum threshold → Rejected.
+#[test]
+fn test_tie_at_exact_quorum_rejects() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let yes_voter = make_voter(&env, &token, &admin, 3_000);
+    let no_voter = make_voter(&env, &token, &admin, 3_000);
+    // quorum = 6_000; yes = no = 3_000, total = 6_000 == quorum
+    let id = create_proposal(&gov, &env, &yes_voter, 6_000);
+    gov.cast_vote(&yes_voter, &id, &Vote::Yes);
+    gov.cast_vote(&no_voter, &id, &Vote::No);
+    finalise(&gov, &env, id);
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Rejected);
+}
+
+// ---------------------------------------------------------------------------
+// Quorum exactly at threshold (passing)
+// ---------------------------------------------------------------------------
+
+/// Total votes equal quorum exactly with yes > no → Passed.
+#[test]
+fn test_quorum_exactly_at_threshold_with_majority_passes() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let yes_voter = make_voter(&env, &token, &admin, 4_000);
+    let no_voter = make_voter(&env, &token, &admin, 2_000);
+    // quorum = 6_000; yes = 4_000, no = 2_000, total = 6_000 == quorum
+    let id = create_proposal(&gov, &env, &yes_voter, 6_000);
+    gov.cast_vote(&yes_voter, &id, &Vote::Yes);
+    gov.cast_vote(&no_voter, &id, &Vote::No);
+    finalise(&gov, &env, id);
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Passed);
+}
+
+// ---------------------------------------------------------------------------
+// min_quorum_bps floor enforcement
+// ---------------------------------------------------------------------------
+
+/// A proposal quorum below the configured `min_quorum_bps` floor must be
+/// rejected at creation time with `QuorumBelowFloor`.
+#[test]
+fn test_min_quorum_bps_floor_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+
+    let token_id = env.register(TokenContract, ());
+    let token = TokenContractClient::new(&env, &token_id);
+    token.initialize(
+        &admin,
+        &1_000_000_000i128,
+        &String::from_str(&env, "CosmosVote"),
+        &String::from_str(&env, "VOTE"),
+        &7u32,
+    );
+
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+    // Configure a 500 bps (5%) minimum quorum floor.
+    gov.initialize(&admin, &token_id, &0i128, &0u64, &0u32, &false, &None, &500u32);
+
+    let proposer = make_voter(&env, &token, &admin, 10_000);
+
+    // Proposal quorum below the floor → rejected.
+    let result = gov.try_create_proposal(
+        &proposer,
+        &String::from_str(&env, "Below Floor"),
+        &String::from_str(&env, "Quorum below min_quorum_bps"),
+        &100i128,
+        &3600u64,
+        &None,
+        &None,
+    );
+    assert!(result.is_err());
+
+    // Proposal quorum at/above the floor → accepted.
+    let id = gov.create_proposal(
+        &proposer,
+        &String::from_str(&env, "At Floor"),
+        &String::from_str(&env, "Quorum at min_quorum_bps"),
+        &1_000i128,
+        &3600u64,
+        &None,
+        &None,
+    );
+    assert_eq!(gov.get_proposal(&id).state, ProposalState::Active);
+}
+
+// ---------------------------------------------------------------------------
+// Quorum update timelock boundary (first 10% window)
+// ---------------------------------------------------------------------------
+
+/// Updating quorum within the first 10% of the voting window is disallowed.
+#[test]
+fn test_quorum_update_disallowed_in_first_10_percent() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let proposer = make_voter(&env, &token, &admin, 10_000);
+    // duration = 3600; first 10% = 360s
+    let id = create_proposal(&gov, &env, &proposer, 1_000);
+
+    let proposal = gov.get_proposal(&id);
+    let start = proposal.start_time;
+    // Move to just inside the first 10% window (start + 100s).
+    env.ledger().with_mut(|l| l.timestamp = start + 100);
+
+    let result = gov.try_update_quorum(&admin, &id, &2_000i128);
+    assert!(result.is_err());
+}
+
+/// Updating quorum after the first 10% window is allowed.
+#[test]
+fn test_quorum_update_allowed_after_first_10_percent() {
+    let env = Env::default();
+    let (gov, token, admin) = setup(&env);
+    let proposer = make_voter(&env, &token, &admin, 10_000);
+    // duration = 3600; first 10% = 360s
+    let id = create_proposal(&gov, &env, &proposer, 1_000);
+
+    let proposal = gov.get_proposal(&id);
+    let start = proposal.start_time;
+    // Move past the first 10% window (start + 400s).
+    env.ledger().with_mut(|l| l.timestamp = start + 400);
+
+    gov.update_quorum(&admin, &id, &2_000i128);
+    assert_eq!(gov.get_proposal(&id).quorum, 2_000);
+}
