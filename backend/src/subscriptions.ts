@@ -23,6 +23,7 @@ import Database from 'better-sqlite3';
 export interface NewSubscription {
   email: string;
   webhookUrl: string;
+  contractId?: string;
 }
 
 export interface SubscriptionRecord extends NewSubscription {
@@ -31,6 +32,66 @@ export interface SubscriptionRecord extends NewSubscription {
 }
 
 const DEFAULT_DB_PATH = './data/subscriptions.db';
+
+/**
+ * Error thrown when a subscription references a contract ID that is not in
+ * the configured allowlist. Carries `status = 400` so the HTTP layer can map
+ * it directly to a Bad Request response.
+ */
+export class UnknownContractError extends Error {
+  readonly status = 400;
+  readonly contractId: string;
+
+  constructor(contractId: string) {
+    super(`Unknown contract ID: ${contractId}`);
+    this.name = 'UnknownContractError';
+    this.contractId = contractId;
+  }
+}
+
+/**
+ * Build the set of allowed contract IDs from the environment.
+ *
+ * Sources (all optional, merged):
+ *   GOVERNANCE_CONTRACT_ID  – single governance contract ID
+ *   TOKEN_CONTRACT_ID       – single token contract ID
+ *   ALLOWED_CONTRACT_IDS    – comma-separated list of additional contract IDs
+ *
+ * An empty allowlist means no contract IDs are permitted.
+ */
+export function getAllowedContractIds(
+  env: NodeJS.ProcessEnv = process.env
+): Set<string> {
+  const ids = new Set<string>();
+
+  const add = (value: string | undefined): void => {
+    if (!value) return;
+    for (const part of value.split(',')) {
+      const trimmed = part.trim();
+      if (trimmed) ids.add(trimmed);
+    }
+  };
+
+  add(env.GOVERNANCE_CONTRACT_ID);
+  add(env.TOKEN_CONTRACT_ID);
+  add(env.ALLOWED_CONTRACT_IDS);
+
+  return ids;
+}
+
+/**
+ * Validate a contract ID against the allowlist.
+ * Throws `UnknownContractError` (status 400) if it is not allowed.
+ */
+export function validateContractId(
+  contractId: string,
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  const allowed = getAllowedContractIds(env);
+  if (!allowed.has(contractId)) {
+    throw new UnknownContractError(contractId);
+  }
+}
 
 export class SubscriptionStore {
   private readonly db: Database.Database;
@@ -71,8 +132,14 @@ export class SubscriptionStore {
   /**
    * Persist a new subscription.
    * Throws if a subscription with the same email already exists.
+   * Throws `UnknownContractError` (status 400) if `contractId` is provided
+   * but is not in the configured allowlist.
    */
   add(sub: NewSubscription): SubscriptionRecord {
+    if (sub.contractId !== undefined) {
+      validateContractId(sub.contractId);
+    }
+
     const now = Date.now();
     const result = this.db
       .prepare(
@@ -84,6 +151,7 @@ export class SubscriptionStore {
       id: result.lastInsertRowid as number,
       email: sub.email,
       webhookUrl: sub.webhookUrl,
+      contractId: sub.contractId,
       createdAt: now,
     };
   }

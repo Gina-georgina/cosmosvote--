@@ -65,3 +65,48 @@ The [Deploy Script Validation](.github/workflows/deploy-validation.yml) workflow
 1. **ShellCheck** — static analysis for syntax and common shell bugs (`-S warning`)
 2. **Testnet dry run** — executes `deploy_testnet.sh` with `DRY_RUN=1` and stub credentials
 3. **Mainnet syntax check** — `bash -n deploy_mainnet.sh` (no execution, no network calls)
+
+---
+
+## Testnet Deployment Gate
+
+Testnet deployments are gated on integration tests. The
+[Testnet Gate](.github/workflows/testnet-gate.yml) workflow runs
+`make test-integration` and **must pass before any testnet deployment is
+allowed**. If the integration suite fails, the deployment is blocked and a
+notification is sent to the team webhook.
+
+### How the gate works
+
+1. The `testnet-gate.yml` workflow runs `make test-integration` on every push
+   and pull request targeting the deployment branch.
+2. The workflow exposes a single required status check named
+   **`testnet-gate`**.
+3. Deployment jobs (and any manual `deploy_testnet.sh` run in CI) declare
+   `needs: testnet-gate`, so they cannot start until the integration tests pass.
+4. On failure, the workflow posts a message to the team webhook
+   (`TEAM_WEBHOOK_URL` repository secret) so the team is alerted immediately.
+
+### Enforcing the gate as a required status check
+
+The gate is only authoritative when it is configured as a **required status
+check** on the deployment branch via branch protection. Configure it once in
+the repository settings:
+
+1. Go to **Settings → Branches → Branch protection rules**.
+2. Add (or edit) a rule for the deployment branch (e.g. `main`).
+3. Enable **Require status checks to pass before merging**.
+4. Search for and select **`testnet-gate`** as a required check.
+5. Enable **Require branches to be up to date before merging** so the gate runs
+   against the latest code.
+6. Save the rule.
+
+Once configured, merges to the deployment branch — and therefore testnet
+deployments — are blocked until `make test-integration` passes.
+
+### Webhook notifications
+
+Set the `TEAM_WEBHOOK_URL` repository secret (**Settings → Secrets and
+variables → Actions**) to the team webhook endpoint. When the gate fails, the
+workflow sends a notification containing the failing run URL so the team can
+investigate before retrying the deployment.

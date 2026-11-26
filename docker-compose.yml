@@ -67,13 +67,22 @@ services:
       FAUCET_PORT: "3001"
       FAUCET_ALLOWED_ORIGIN: ${FAUCET_ALLOWED_ORIGIN:-http://localhost:5173}
       FAUCET_TOKEN_CONTRACT_ID: ${FAUCET_TOKEN_CONTRACT_ID:-}
-      FAUCET_ADMIN_SECRET_KEY: ${FAUCET_ADMIN_SECRET_KEY:-}
+      # The faucet signing keypair is read from a mounted secret file rather than
+      # an environment variable (env vars leak via /proc, logs and crash dumps).
+      # Create the file locally before starting the faucet profile:
+      #   mkdir -p secrets
+      #   printf '%s' "$FAUCET_ADMIN_SECRET_KEY" > secrets/faucet_secret_key.txt
+      #   chmod 600 secrets/faucet_secret_key.txt
+      # The secrets/ directory is git-ignored and must NEVER be committed.
+      FAUCET_SECRET_KEY_FILE: /run/secrets/faucet_secret_key
       FAUCET_RPC_URL: https://soroban-testnet.stellar.org
       FAUCET_AMOUNT: ${FAUCET_AMOUNT:-1000000000}
       FAUCET_TOKEN_DECIMALS: ${FAUCET_TOKEN_DECIMALS:-7}
       FAUCET_DB_PATH: /data/faucet.sqlite
     volumes:
       - faucet-data:/data
+    secrets:
+      - faucet_secret_key
     restart: unless-stopped
     healthcheck:
       test:
@@ -87,6 +96,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+secrets:
+  faucet_secret_key:
+    file: ./secrets/faucet_secret_key.txt
 
 volumes:
   cargo-cache:

@@ -5,6 +5,25 @@ function makeStore(): SubscriptionStore {
   return new SubscriptionStore(':memory:');
 }
 
+const GOVERNANCE_ID = 'GOVERNANCE-CONTRACT-0001';
+const TOKEN_ID = 'TOKEN-CONTRACT-0001';
+const EXTRA_ALLOWED_ID = 'EXTRA-CONTRACT-0001';
+const UNKNOWN_ID = 'UNKNOWN-CONTRACT-9999';
+
+/** Set the allowlist-related env vars before constructing a store. */
+function setAllowlistEnv(): void {
+  process.env.GOVERNANCE_CONTRACT_ID = GOVERNANCE_ID;
+  process.env.TOKEN_CONTRACT_ID = TOKEN_ID;
+  process.env.ALLOWED_CONTRACT_IDS = `${GOVERNANCE_ID},${TOKEN_ID},${EXTRA_ALLOWED_ID}`;
+}
+
+/** Remove the allowlist-related env vars. */
+function clearAllowlistEnv(): void {
+  delete process.env.GOVERNANCE_CONTRACT_ID;
+  delete process.env.TOKEN_CONTRACT_ID;
+  delete process.env.ALLOWED_CONTRACT_IDS;
+}
+
 describe('SubscriptionStore', () => {
   let store: SubscriptionStore;
 
@@ -120,5 +139,68 @@ describe('SubscriptionStore', () => {
     s2.add({ email: 'grace@example.com', webhookUrl: 'https://hooks.example.com/grace' });
     expect(s2.findAll()).toHaveLength(1);
     s2.close();
+  });
+
+  // ── contract allowlist ────────────────────────────────────────────────────
+
+  describe('contract allowlist', () => {
+    let allowStore: SubscriptionStore;
+
+    beforeEach(() => {
+      setAllowlistEnv();
+      allowStore = makeStore();
+    });
+
+    afterEach(() => {
+      allowStore.close();
+      clearAllowlistEnv();
+    });
+
+    it('accepts a subscription for the governance contract ID', () => {
+      const record = allowStore.add({
+        email: 'gov@example.com',
+        webhookUrl: 'https://hooks.example.com/gov',
+        contractId: GOVERNANCE_ID,
+      });
+
+      expect(record.contractId).toBe(GOVERNANCE_ID);
+    });
+
+    it('accepts a subscription for the token contract ID', () => {
+      const record = allowStore.add({
+        email: 'token@example.com',
+        webhookUrl: 'https://hooks.example.com/token',
+        contractId: TOKEN_ID,
+      });
+
+      expect(record.contractId).toBe(TOKEN_ID);
+    });
+
+    it('accepts a subscription for a contract ID listed in ALLOWED_CONTRACT_IDS', () => {
+      const record = allowStore.add({
+        email: 'extra@example.com',
+        webhookUrl: 'https://hooks.example.com/extra',
+        contractId: EXTRA_ALLOWED_ID,
+      });
+
+      expect(record.contractId).toBe(EXTRA_ALLOWED_ID);
+    });
+
+    it('rejects an unknown contract ID with a 400 error', () => {
+      let caught: any;
+      try {
+        allowStore.add({
+          email: 'bad@example.com',
+          webhookUrl: 'https://hooks.example.com/bad',
+          contractId: UNKNOWN_ID,
+        });
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught.status).toBe(400);
+      expect(allowStore.findAll()).toHaveLength(0);
+    });
   });
 });

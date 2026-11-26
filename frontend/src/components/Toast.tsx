@@ -6,6 +6,13 @@ export interface Toast {
   id: number;
   type: ToastType;
   message: string;
+  txHash?: string;
+}
+
+const EXPLORER_TX_BASE = 'https://stellar.expert/explorer/public/tx/';
+
+function truncateHash(hash: string): string {
+  return hash.length > 12 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash;
 }
 
 const COLORS: Record<ToastType, { bg: string; border: string; icon: string }> = {
@@ -34,9 +41,9 @@ export function useToast() {
     if (timer) { clearTimeout(timer); timers.current.delete(id); }
   }, []);
 
-  const show = useCallback((type: ToastType, message: string): number => {
+  const show = useCallback((type: ToastType, message: string, txHash?: string): number => {
     const id = _nextId++;
-    setToasts(prev => [...prev, { id, type, message }]);
+    setToasts(prev => [...prev, { id, type, message, txHash }]);
     const delay = AUTO_DISMISS_MS[type];
     if (delay > 0) {
       const timer = setTimeout(() => dismiss(id), delay);
@@ -100,7 +107,22 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
             }}
           >
             <span aria-hidden="true">{icon}</span>
-            <span style={{ flex: 1 }}>{t.message}</span>
+            <span style={{ flex: 1 }}>
+              {t.message}
+              {t.txHash && (
+                <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.75rem' }}>
+                  <a
+                    href={`${EXPLORER_TX_BASE}${t.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#2563eb', textDecoration: 'underline' }}
+                    title={t.txHash}
+                  >
+                    {truncateHash(t.txHash)}
+                  </a>
+                </span>
+              )}
+            </span>
             <button
               onClick={() => onDismiss(t.id)}
               aria-label="Dismiss notification"

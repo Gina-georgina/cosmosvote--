@@ -92,6 +92,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "description": "Alert: RPC error rate > 5% for 5m (monitoring/alerts.yml: CosmosVoteRpcErrorRateHigh). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "rate(cosmosvote_rpc_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_rpc_requests_total{network=\"$network\"}[5m])",
@@ -110,6 +111,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" } } },
+      "description": "Alert: no proposals finalised in 24h while proposals are active (monitoring/alerts.yml: CosmosVoteProposalFinalisationStalled). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "cosmosvote_proposals_active{network=\"$network\"}",
@@ -271,6 +273,30 @@
         {
           "expr": "rate(notification_failed_total{service=\"cosmosvote-notification\"}[5m]) / (rate(notification_sent_total{service=\"cosmosvote-notification\"}[5m]) + rate(notification_failed_total{service=\"cosmosvote-notification\"}[5m]))",
           "legendFormat": "failure rate"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Faucet Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.05 },
+            { "color": "red", "value": 0.10 }
+          ]}
+        }
+      },
+      "description": "Alert: faucet error rate > 10% for 5m (monitoring/alerts.yml: CosmosVoteFaucetErrorRateHigh). Routed to team webhook/email.",
+      "targets": [
+        {
+          "expr": "rate(cosmosvote_faucet_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_faucet_claims_total{network=\"$network\"}[5m])",
+          "legendFormat": "faucet error rate"
         }
       ]
     }
