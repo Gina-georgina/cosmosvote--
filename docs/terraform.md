@@ -230,6 +230,55 @@ terraform {
 
 ---
 
+## Drift Detection
+
+Infrastructure drift occurs when the actual cloud resources diverge from the declared Terraform state (for example, manual changes made in the AWS console). A scheduled GitHub Actions workflow detects drift automatically.
+
+### Schedule
+
+The workflow (`.github/workflows/terraform-drift.yml`) runs `terraform plan` **daily** on a cron schedule, and can also be triggered manually via `workflow_dispatch`.
+
+### Required Secrets
+
+Configure the following repository secrets before enabling the workflow:
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_DRIFT_ROLE_ARN` | ARN of an IAM role with **read-only** AWS permissions (e.g. `ReadOnlyAccess` plus `s3:GetObject`/`s3:ListBucket` on the state bucket and `dynamodb:GetItem`/`dynamodb:PutItem`/`dynamodb:DeleteItem` on the lock table). The workflow assumes this role via OIDC — no long-lived keys. |
+| `TEAM_WEBHOOK_URL` | Incoming webhook URL (Slack/Teams) that receives drift alerts. |
+
+The workflow uses read-only credentials only: it never runs `terraform apply`, so drift is reported but never auto-remediated.
+
+### Running the Plan Locally
+
+Reproduce the drift check on your machine with the same read-only credentials:
+
+```bash
+terraform init -backend-config="envs/production.s3.tfbackend"
+terraform workspace select mainnet
+terraform plan -var-file="envs/mainnet.tfvars" -detailed-exitcode
+```
+
+`terraform plan -detailed-exitcode` returns:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | No changes — no drift |
+| `1` | Error during plan |
+| `2` | Changes present — drift detected |
+
+### Interpreting Drift Alerts
+
+When the plan is non-empty, the workflow posts an alert to `TEAM_WEBHOOK_URL` containing the workflow run link and a summary of the detected changes.
+
+1. Open the linked workflow run and review the `terraform plan` output.
+2. Determine whether the change was intentional (e.g. an approved hotfix) or accidental.
+3. If intentional, update the Terraform configuration to match and merge it so the next plan is clean.
+4. If accidental, revert the manual change in the AWS console (or re-apply Terraform after review).
+5. Never apply directly from the drift workflow — always go through the normal reviewed `apply` process.
+
+---
+
 ## Related
 
 - [Configuration reference](./config/) — `local.toml`, `testnet.toml`, `mainnet.toml`

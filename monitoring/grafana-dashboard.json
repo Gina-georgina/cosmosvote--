@@ -164,21 +164,10 @@
       "id": 3,
       "title": "Error Rate",
       "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit"
-        }
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "description": "Alert: RPC error rate > 5% for 5m (monitoring/alerts.yml: CosmosVoteRpcErrorRateHigh). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "rate(cosmosvote_rpc_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_rpc_requests_total{network=\"$network\"}[5m])",
@@ -194,24 +183,10 @@
       "id": 4,
       "title": "Active Proposals",
       "type": "stat",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "thresholds"
-          }
-        }
-      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" } } },
+      "description": "Alert: no proposals finalised in 24h while proposals are active (monitoring/alerts.yml: CosmosVoteProposalFinalisationStalled). Routed to team webhook/email.",
       "targets": [
         {
           "expr": "cosmosvote_proposals_active{network=\"$network\"}",
@@ -503,79 +478,25 @@
     },
     {
       "id": 12,
-      "title": "Backend Faucet Claims / Minute",
+      "title": "Faucet Error Rate",
       "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 28
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "percentunit",
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.05 },
+            { "color": "red", "value": 0.10 }
+          ]}
         }
       },
+      "description": "Alert: faucet error rate > 10% for 5m (monitoring/alerts.yml: CosmosVoteFaucetErrorRateHigh). Routed to team webhook/email.",
       "targets": [
         {
-          "expr": "rate(notification_sent_total[1m]) * 60",
-          "legendFormat": "claims/min"
-        }
-      ]
-    },
-    {
-      "id": 13,
-      "title": "Backend Webhook Delivery Latency",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 28
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, rate(webhook_latency_seconds_bucket[5m]))",
-          "legendFormat": "p95"
-        }
-      ]
-    },
-    {
-      "id": 14,
-      "title": "Backend RPC Error Rate",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 36
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit"
-        }
-      },
-      "targets": [
-        {
-          "expr": "rate(notification_failed_total[5m]) / (rate(notification_failed_total[5m]) + rate(notification_sent_total[5m]))",
-          "legendFormat": "error rate"
+          "expr": "rate(cosmosvote_faucet_errors_total{network=\"$network\"}[5m]) / rate(cosmosvote_faucet_claims_total{network=\"$network\"}[5m])",
+          "legendFormat": "faucet error rate"
         }
       ]
     }

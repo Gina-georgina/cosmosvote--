@@ -89,14 +89,15 @@ export async function metricsHandler(
 
   try {
     const content = await registry.metrics();
-    res.writeHead(200, { 'Content-Type': registry.contentType });
+    // Use a compressible text content type so the compression middleware
+    // (gzip/brotli) can shrink large metrics payloads. The Prometheus text
+    // exposition format is plain text; append charset for correctness.
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+    });
     res.end(content);
   } catch (err) {
-    sendProblem(res, req, {
-      type: PROBLEM_TYPES.internal,
-      title: 'Internal Server Error',
-      status: 500,
-      detail: err instanceof Error ? err.message : 'Failed to collect metrics.',
-    });
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Internal Server Error');
   }
 }

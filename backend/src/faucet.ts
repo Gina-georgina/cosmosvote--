@@ -2,8 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { corsHeaders, isOriginAllowed } from './cors';
-import { sendProblem, PROBLEM_TYPES } from './problemJson';
-import { withRequestTimeout } from './requestTimeout';
+import { resolveFaucetSecretKey } from './secrets';
 import {
   Contract,
   Keypair,
@@ -19,42 +18,105 @@ const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2048;
 const TESTNET_EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
 
+export class FaucetDatabaseUnavailableError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = 'FaucetDatabaseUnavailableError';
+  }
+}
+
+function isDatabaseUnavailable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    /database is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(error.message)
+  );
+}
+
 export class FaucetClaimStore {
   private readonly db: Database.Database;
+  // FIFO queue that serializes all write operations on the single connection.
+  private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(databasePath: string) {
     if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new Database(databasePath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS faucet_claims (
-        wallet_address TEXT PRIMARY KEY,
-        claimed_at_ms INTEGER NOT NULL
-      )
-    `);
+    try {
+      this.db = new Database(databasePath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('busy_timeout = 5000');
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS faucet_claims (
+          wallet_address TEXT PRIMARY KEY,
+          claimed_at_ms INTEGER NOT NULL
+        )
+      `);
+      // Verify the connection is healthy before serving traffic.
+      this.db.prepare('SELECT 1').get();
+    } catch (error) {
+      throw new FaucetDatabaseUnavailableError(
+        `Faucet database is unavailable at ${databasePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error,
+      );
+    }
   }
 
-  reserve(address: string, now = Date.now()): number | null {
-    const cutoff = now - CLAIM_COOLDOWN_MS;
-    const reserve = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
-      const result = this.db.prepare(
-        'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
-      ).run(address, now);
-      return result.changes === 1;
+  private enqueueWrite<T>(operation: () => T): Promise<T> {
+    const run = this.writeQueue.then(operation, operation);
+    // Keep the chain alive even if an operation rejects.
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private wrapError(error: unknown): never {
+    if (isDatabaseUnavailable(error)) {
+      throw new FaucetDatabaseUnavailableError(
+        'Faucet database is temporarily unavailable.',
+        error,
+      );
+    }
+    throw error;
+  }
+
+  reserve(address: string, now = Date.now()): Promise<number | null> {
+    return this.enqueueWrite(() => {
+      try {
+        const cutoff = now - CLAIM_COOLDOWN_MS;
+        const reserve = this.db.transaction(() => {
+          this.db.prepare('DELETE FROM faucet_claims WHERE claimed_at_ms <= ?').run(cutoff);
+          const result = this.db.prepare(
+            'INSERT OR IGNORE INTO faucet_claims (wallet_address, claimed_at_ms) VALUES (?, ?)'
+          ).run(address, now);
+          return result.changes === 1;
+        });
+
+        if (reserve()) return null;
+        const claim = this.db.prepare(
+          'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
+        ).get(address) as { claimed_at_ms: number } | undefined;
+        return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
+      } catch (error) {
+        this.wrapError(error);
+      }
     });
-
-    if (reserve()) return null;
-    const claim = this.db.prepare(
-      'SELECT claimed_at_ms FROM faucet_claims WHERE wallet_address = ?'
-    ).get(address) as { claimed_at_ms: number } | undefined;
-    return claim ? claim.claimed_at_ms + CLAIM_COOLDOWN_MS : null;
   }
 
-  release(address: string, claimedAt: number): void {
-    this.db.prepare(
-      'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
-    ).run(address, claimedAt);
+  release(address: string, claimedAt: number): Promise<void> {
+    return this.enqueueWrite(() => {
+      try {
+        this.db.prepare(
+          'DELETE FROM faucet_claims WHERE wallet_address = ? AND claimed_at_ms = ?'
+        ).run(address, claimedAt);
+      } catch (error) {
+        this.wrapError(error);
+      }
+    });
   }
 
   close(): void {
@@ -228,7 +290,17 @@ export function createFaucetServer(
     }
 
     const now = Date.now();
-    const retryAt = store.reserve(address, now);
+    let retryAt: number | null;
+    try {
+      retryAt = await store.reserve(address, now);
+    } catch (error) {
+      if (error instanceof FaucetDatabaseUnavailableError) {
+        response.setHeader('Retry-After', '5');
+        sendJson(response, 503, { error: 'Faucet database is temporarily unavailable. Please retry shortly.' });
+        return;
+      }
+      throw error;
+    }
     if (retryAt !== null) {
       response.setHeader('Retry-After', Math.max(1, Math.ceil((retryAt - now) / 1000)));
       sendProblem(response, request, {
@@ -250,7 +322,11 @@ export function createFaucetServer(
       });
     } catch (error) {
       if (!(error instanceof FaucetMintError) || !error.claimConsumed) {
-        store.release(address, now);
+        try {
+          await store.release(address, now);
+        } catch (releaseError) {
+          if (!(releaseError instanceof FaucetDatabaseUnavailableError)) throw releaseError;
+        }
       }
       sendProblem(response, request, {
         type: PROBLEM_TYPES.internal,
@@ -267,7 +343,6 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   const required = [
     'FAUCET_ALLOWED_ORIGIN',
     'FAUCET_TOKEN_CONTRACT_ID',
-    'FAUCET_ADMIN_SECRET_KEY',
   ] as const;
   const missing = required.filter(key => !env[key]);
   if (missing.length) throw new Error(`Faucet is enabled but missing: ${missing.join(', ')}`);
@@ -284,9 +359,14 @@ export function readFaucetConfig(env: NodeJS.ProcessEnv): FaucetConfig | null {
   if (new URL(env.FAUCET_ALLOWED_ORIGIN!).protocol !== 'https:' && env.NODE_ENV === 'production') {
     throw new Error('FAUCET_ALLOWED_ORIGIN must use HTTPS in production.');
   }
-  const adminSecretKey = env.FAUCET_ADMIN_SECRET_KEY!;
-  if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
-    throw new Error('FAUCET_ADMIN_SECRET_KEY is invalid.');
+  const adminSecretKey = resolveFaucetSecretKey(env);
+  try {
+    if (Keypair.fromSecret(adminSecretKey).publicKey().length !== 56) {
+      throw new Error('invalid public key length');
+    }
+  } catch {
+    // Never include the secret value in the error message.
+    throw new Error('The configured faucet secret key is invalid.');
   }
   const tokenContractId = env.FAUCET_TOKEN_CONTRACT_ID!;
   if (!StrKey.isValidContract(tokenContractId)) throw new Error('FAUCET_TOKEN_CONTRACT_ID is invalid.');
