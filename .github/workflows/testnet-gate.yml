@@ -38,6 +38,12 @@ jobs:
       - name: Build WASM binaries
         run: cargo build --release --target wasm32-unknown-unknown
 
+      # ── Pre-flight: environment variable validation ──────────────────
+      # Fails if any variable in .env.example is undocumented, catching
+      # env var drift before we attempt a deploy.
+      - name: Validate .env.example
+        run: bash scripts/check_env_example.sh
+
       - name: Deploy contracts to testnet
         id: deploy
         env:

@@ -369,3 +369,29 @@ bash scripts/validate-env.sh
 ```
 
 The frontend performs its own validation on startup via `src/config.ts`.
+
+### `.env.example` Documentation Check (CI Pre-flight)
+
+`scripts/check_env_example.sh` verifies that every variable declared in the `.env.example` files is also documented in this file. It runs as a **required CI step before any deploy step** in the deploy workflows, so a variable that is added to `.env.example` but never documented (and therefore never propagated to CI secrets or staging configs) fails the build instead of breaking a deployment.
+
+Run it locally before opening a PR that touches environment variables:
+
+```bash
+bash scripts/check_env_example.sh
+```
+
+**What it checks:**
+
+- Every variable name listed in the root `.env.example`, `backend/.env.example`, `frontend/.env.example`, `notification-service/.env.example`, and `keeper-service/.env.example` appears in this document.
+- Commented-out example lines and blank lines in the `.env.example` files are ignored.
+
+**If it fails**, the output lists each undocumented variable by name, for example:
+
+```
+Undocumented environment variables found:
+  - FAUCET_RATE_LIMIT
+  - KEEPER_RETRY_BACKOFF_MS
+Add them to docs/environment-variables.md (see the relevant service section).
+```
+
+To fix it, add the variable to the matching table in the appropriate section above (Root / Script, Backend, Notification Service, Keeper Service, Frontend, or Monitoring Script) with its required flag, default, and description. If the variable is obsolete, remove it from the `.env.example` file instead. Re-run the script until it exits successfully.
