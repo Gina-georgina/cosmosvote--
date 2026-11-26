@@ -12,6 +12,7 @@
 
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { visualizer } from 'rollup-plugin-visualizer';
 import { cspNoncePlugin } from './vite-plugin-csp-nonce';
 
 // ── CSP values ────────────────────────────────────────────────────────────────
@@ -37,9 +38,15 @@ const DEV_CSP = [
 
 /**
  * Production CSP header template.
- * 'unsafe-inline' is intentionally absent from script-src.
+ * 'unsafe-inline' is intentionally absent from both script-src and style-src.
  * The server must replace the placeholder with the actual nonce from
  * <meta name="csp-nonce"> before setting the header.
+ *
+ * Issue #392: style-src now uses 'nonce-{{NONCE}}' instead of 'unsafe-inline'.
+ * Dynamically injected <style> tags (CSS-in-JS, Vite HMR in preview builds)
+ * receive the same per-build nonce via the runtime patch installed by
+ * cspNoncePlugin(), so they satisfy style-src without 'unsafe-inline'.
+ * The dev CSP below keeps 'unsafe-inline' because HMR requires it.
  *
  * This value is NOT used directly by Vite — it is here for documentation and
  * for the Terraform / Lambda@Edge configuration to reference.
@@ -55,7 +62,7 @@ export const PRODUCTION_CSP_TEMPLATE = [
   "frame-ancestors 'none'",
   // Replace {{NONCE}} with the actual nonce at request time
   "script-src 'self' 'nonce-{{NONCE}}'",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'nonce-{{NONCE}}'",
   "img-src 'self' data:",
   "font-src 'self' data:",
   // Stellar SDK Web Workers run from blob: URLs
@@ -70,8 +77,22 @@ export const PRODUCTION_CSP_TEMPLATE = [
 export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
-    // Inject per-build nonce in production only (Issue #31)
+    // Inject per-build nonce in production only (Issue #31).
+    // Issue #392: the plugin also installs a runtime patch that applies the
+    // nonce to dynamically injected <style> tags, so style-src can drop
+    // 'unsafe-inline' in production.
     ...(mode === 'production' ? [cspNoncePlugin()] : []),
+    // Bundle analysis (Issue #396): `vite build --report` writes dist/stats.html
+    ...(process.argv.includes('--report')
+      ? [
+          visualizer({
+            filename: 'dist/stats.html',
+            gzipSize: true,
+            brotliSize: true,
+            template: 'treemap',
+          }),
+        ]
+      : []),
   ],
 
   server: {
@@ -84,6 +105,25 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Issue #396: keep the lazily-loaded tab components in their own chunks
+        // so the initial bundle stays small and the split is visible in the
+        // bundle analysis report.
+        manualChunks(id) {
+          if (id.includes('GovernanceAnalytics')) {
+            return 'governance-analytics';
+          }
+          if (id.includes('DelegationPanel')) {
+            return 'delegation-panel';
+          }
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 
   test: {

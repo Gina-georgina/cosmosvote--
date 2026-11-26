@@ -241,6 +241,13 @@ impl GovernanceEvents {
         );
     }
 
+    /// Emitted by `update_proposal_cooldown` when the admin changes the
+    /// proposal cooldown. Payload: `(admin, old_cooldown, new_cooldown)`.
+    /// Shares the `("gov", "cooldown")` topic with `cooldown_updated`.
+    pub fn proposal_cooldown_updated(env: &Env, admin: &Address, old_value: u64, new_value: u64) {
+        Self::cooldown_updated(env, admin, old_value, new_value);
+    }
+
     pub fn restrict_admin_vote_updated(env: &Env, admin: &Address, old_value: bool, new_value: bool) {
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("rest_vote")),

@@ -97,6 +97,44 @@ describe('migrateUp', () => {
     expect(rows[0].name).toBe('001_create_users');
   });
 
+  it('creates the _migrations tracking table and populates it with name and applied_at', () => {
+    const db = inMemoryDb();
+    migrateUp(db, [MIGRATION_A, MIGRATION_B]);
+    expect(tableExists(db, '_migrations')).toBe(true);
+    expect(columnExists(db, '_migrations', 'name')).toBe(true);
+    expect(columnExists(db, '_migrations', 'applied_at')).toBe(true);
+
+    const rows = db
+      .prepare('SELECT name, applied_at FROM _migrations ORDER BY id')
+      .all() as Array<{ name: string; applied_at: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.name)).toEqual(['001_create_users', '002_add_email']);
+    for (const row of rows) {
+      expect(typeof row.applied_at).toBe('string');
+      expect(row.applied_at.length).toBeGreaterThan(0);
+      expect(Number.isNaN(Date.parse(row.applied_at))).toBe(false);
+    }
+  });
+
+  it('does not re-record already-applied migrations on re-run', () => {
+    const db = inMemoryDb();
+    migrateUp(db, [MIGRATION_A]);
+    const firstRows = db
+      .prepare('SELECT name, applied_at FROM _migrations')
+      .all() as Array<{ name: string; applied_at: string }>;
+    expect(firstRows).toHaveLength(1);
+
+    const second = migrateUp(db, [MIGRATION_A]);
+    expect(second).toBe(0);
+
+    const secondRows = db
+      .prepare('SELECT name, applied_at FROM _migrations')
+      .all() as Array<{ name: string; applied_at: string }>;
+    expect(secondRows).toHaveLength(1);
+    expect(secondRows[0].name).toBe('001_create_users');
+    expect(secondRows[0].applied_at).toBe(firstRows[0].applied_at);
+  });
+
   it('returns 0 when all migrations are already applied', () => {
     const db = inMemoryDb();
     migrateUp(db, [MIGRATION_A]);
@@ -141,6 +179,25 @@ describe('migrateDown', () => {
     migrateDown(db, [MIGRATION_A]);
     const rows = db.prepare('SELECT name FROM _migrations').all();
     expect(rows).toHaveLength(0);
+  });
+
+  it('removes only the last record and reverts the last migration', () => {
+    const db = inMemoryDb();
+    migrateUp(db, [MIGRATION_A, MIGRATION_B]);
+    expect(columnExists(db, 'users', 'email')).toBe(true);
+
+    const rolled = migrateDown(db, [MIGRATION_A, MIGRATION_B]);
+    expect(rolled).toBe('002_add_email');
+
+    const rows = db
+      .prepare('SELECT name FROM _migrations ORDER BY id')
+      .all() as Array<{ name: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('001_create_users');
+
+    // The last migration was reverted: email column is gone, users table remains.
+    expect(columnExists(db, 'users', 'email')).toBe(false);
+    expect(tableExists(db, 'users')).toBe(true);
   });
 
   it('returns null when there are no migrations to roll back', () => {

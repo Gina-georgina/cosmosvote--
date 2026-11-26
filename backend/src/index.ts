@@ -4,6 +4,7 @@ import { createHealthServer } from './health';
 import { NotificationService } from './notificationService';
 import { logger } from './logger';
 import helmet from 'helmet';
+import compression from 'compression';
 
 // Validate env vars before anything else — fails fast with a clear message.
 const env = loadEnv();
@@ -33,7 +34,41 @@ const securityHeaders = helmet({
   referrerPolicy: { policy: 'strict-origin' },
 });
 
-const healthServer = createHealthServer(() => service.checkReadiness(), securityHeaders);
+// Response compression middleware. Negotiates gzip/brotli via the client's
+// Accept-Encoding header, only compresses bodies larger than 1 KB, and skips
+// already-compressed binary content types (images, zip, etc.).
+const compressionMiddleware = compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    const contentType = res.getHeader('Content-Type');
+    if (typeof contentType === 'string') {
+      const type = contentType.toLowerCase();
+      const alreadyCompressed = [
+        'image/',
+        'video/',
+        'audio/',
+        'application/zip',
+        'application/gzip',
+        'application/x-gzip',
+        'application/x-compress',
+        'application/x-rar-compressed',
+        'application/x-7z-compressed',
+        'application/octet-stream',
+      ];
+      if (alreadyCompressed.some((prefix) => type.startsWith(prefix))) {
+        return false;
+      }
+    }
+    // Fall back to the default filter (respects Accept-Encoding, skips HEAD, etc.).
+    return compression.filter(req, res);
+  },
+});
+
+const healthServer = createHealthServer(
+  () => service.checkReadiness(),
+  securityHeaders,
+  compressionMiddleware,
+);
 const healthPort = env.HEALTH_PORT;
 healthServer.listen(healthPort, '0.0.0.0', () => {
   console.info(`[cosmosvote-backend] health endpoints listening on port ${healthPort}`);

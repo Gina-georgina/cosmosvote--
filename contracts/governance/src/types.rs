@@ -59,6 +59,7 @@ pub enum ContractError {
     // Execution
     ExecutionFailed     = 60,
     InvalidTreasuryAmount = 61,
+    InvalidRecipient    = 62,
 }
 
 // ---------------------------------------------------------------------------

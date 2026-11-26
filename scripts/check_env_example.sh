@@ -70,6 +70,65 @@ get_example_suppressions() {
     | grep -oE '[A-Z][A-Z0-9_]+$' | sort -u
 }
 
+# Extract documented env var names from the environment variables doc.
+# A var is considered documented if it appears as a backticked token or a
+# heading/table entry, e.g. `NETWORK`, ### NETWORK, or | NETWORK |.
+get_documented_keys() {
+  local doc_file="$1"
+  [[ -f "$doc_file" ]] || return 0
+  grep -oE '`[A-Z][A-Z0-9_]*`|^#{1,6}[[:space:]]+[A-Z][A-Z0-9_]*|\|[[:space:]]*[A-Z][A-Z0-9_]*[[:space:]]*\|' "$doc_file" \
+    | grep -oE '[A-Z][A-Z0-9_]+' | sort -u
+}
+
+# Verify that every key in .env.example is documented in the docs file.
+# Prints a clear list of undocumented variables and sets exit_code=1.
+check_docs_coverage() {
+  local example_file="$1"
+  local doc_file="$2"
+
+  echo ""
+  echo "── docs coverage ──────────────────────────────────────────────────────"
+
+  if [[ ! -f "$example_file" ]]; then
+    echo -e "${YELLOW}  ⚠ .env.example not found: ${example_file} — skipping${NC}"
+    return
+  fi
+
+  if [[ ! -f "$doc_file" ]]; then
+    echo -e "${RED}  ✗ documentation file not found: ${doc_file}${NC}"
+    exit_code=1
+    return
+  fi
+
+  mapfile -t example_keys < <(get_example_keys "$example_file")
+  mapfile -t documented_keys < <(get_documented_keys "$doc_file")
+
+  declare -A documented_map
+  for k in "${documented_keys[@]}"; do
+    documented_map["$k"]=1
+  done
+
+  local undocumented=()
+  for k in "${example_keys[@]}"; do
+    [[ -z "$k" ]] && continue
+    if [[ -z "${documented_map[$k]:-}" ]]; then
+      undocumented+=("$k")
+    fi
+  done
+
+  if [[ ${#undocumented[@]} -eq 0 ]]; then
+    echo -e "${GREEN}  ✓ All ${#example_keys[@]} .env.example var(s) are documented in ${doc_file}${NC}"
+  else
+    echo -e "${RED}  ✗ ${#undocumented[@]} env var(s) in ${example_file} are not documented in ${doc_file}:${NC}"
+    for u in "${undocumented[@]}"; do
+      echo -e "${RED}    - ${u}${NC}"
+    done
+    echo ""
+    echo -e "  Add a section or table entry for each variable in ${doc_file}."
+    exit_code=1
+  fi
+}
+
 # Extract env var references from source files.
 # Scans .ts/.tsx/.js/.jsx for process.env.* and import.meta.env.*
 # Scans .sh for $VAR and ${VAR}
@@ -225,11 +284,18 @@ for svc in "${services[@]}"; do
   check_service "$name" "$src_dir" "$example_file" "$pattern"
 done
 
+# Validate that every .env.example key is documented in docs/environment-variables.md
+DOC_FILE="${ROOT_DIR}/docs/environment-variables.md"
+for svc in "${services[@]}"; do
+  IFS='|' read -r name src_dir example_file pattern <<< "$svc"
+  check_docs_coverage "$example_file" "$DOC_FILE"
+done
+
 echo ""
 if [[ $exit_code -eq 0 ]]; then
-  echo -e "${GREEN}✓ All .env.example files are complete.${NC}"
+  echo -e "${GREEN}✓ All .env.example files are complete and documented.${NC}"
 else
-  echo -e "${RED}✗ Some .env.example files are missing referenced env vars.${NC}"
+  echo -e "${RED}✗ Some .env.example files are missing referenced env vars or documentation.${NC}"
   echo -e "${RED}  See above for details.${NC}"
 fi
 
